@@ -37,7 +37,7 @@ static struct option paired_long_options[] = {
     {NULL, 0, NULL, 0}
 };
 
-void paired_usage (int status, char *msg) {
+void paired_usage (int status, char const *msg) {
 
     fprintf(stderr, "\nIf you have separate files for forward and reverse reads:\n");
     fprintf(stderr, "Usage: %s pe [options] -f <paired-end forward fastq file> -r <paired-end reverse fastq file> -t <quality type> -o <trimmed PE forward file> -p <trimmed PE reverse file> -s <trimmed singles file>\n\n", PROGRAM_NAME);

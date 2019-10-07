@@ -1,7 +1,7 @@
 PROGRAM_NAME = sickle
 VERSION = 1.33
-CC = gcc
-CFLAGS = -Wall -pedantic -DVERSION=$(VERSION)
+CXX = g++
+CXXFLAGS = -std=c++11 -Wall -pedantic -DVERSION=$(VERSION) -D__STDC_LIMIT_MACROS
 DEBUG = -g
 OPT = -O3
 ARCHIVE = $(PROGRAM_NAME)_$(VERSION)
@@ -13,20 +13,20 @@ SDIR = src
 
 default: build
 
-sliding.o: $(SDIR)/sliding.c $(SDIR)/kseq.h $(SDIR)/sickle.h
-	$(CC) $(CFLAGS) $(OPT) -c $(SDIR)/$*.c
+sliding.o: $(SDIR)/sliding.cpp $(SDIR)/kseq.h $(SDIR)/sickle.h
+	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
-trim_single.o: $(SDIR)/trim_single.c $(SDIR)/sickle.h $(SDIR)/kseq.h
-	$(CC) $(CFLAGS) $(OPT) -c $(SDIR)/$*.c
+trim_single.o: $(SDIR)/trim_single.cpp $(SDIR)/sickle.h $(SDIR)/kseq.h
+	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
-trim_paired.o: $(SDIR)/trim_paired.c $(SDIR)/sickle.h $(SDIR)/kseq.h
-	$(CC) $(CFLAGS) $(OPT) -c $(SDIR)/$*.c
+trim_paired.o: $(SDIR)/trim_paired.cpp $(SDIR)/sickle.h $(SDIR)/kseq.h
+	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
-sickle.o: $(SDIR)/sickle.c $(SDIR)/sickle.h
-	$(CC) $(CFLAGS) $(OPT) -c $(SDIR)/$*.c
+sickle.o: $(SDIR)/sickle.cpp $(SDIR)/sickle.h
+	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
-print_record.o: $(SDIR)/print_record.c $(SDIR)/print_record.h
-	$(CC) $(CFLAGS) $(OPT) -c $(SDIR)/$*.c
+print_record.o: $(SDIR)/print_record.cpp $(SDIR)/print_record.h
+	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
 clean:
 	rm -rf *.o $(SDIR)/*.gch ./sickle
@@ -38,8 +38,8 @@ dist:
 	tar -zcf $(ARCHIVE).tar.gz src Makefile README.md sickle.xml LICENSE
 
 build: sliding.o trim_single.o trim_paired.o sickle.o print_record.o
-	$(CC) $(CFLAGS) $(LDFLAGS) $(OPT) $? -o sickle $(LIBS)
+	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OPT) $? -o sickle $(LIBS)
 
 debug:
-	$(MAKE) build "CFLAGS=-Wall -pedantic -g -DDEBUG"
+	$(MAKE) build "CXXFLAGS=-Wall -pedantic -D__STDC_LIMIT_MACROS -g -DDEBUG"
 

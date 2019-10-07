@@ -1,2 +1,4 @@
 *.o
 sickle
+test/output/*
+.vscode/settings.json
