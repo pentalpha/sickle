@@ -46,7 +46,7 @@ cutsites* sliding_window (kseq_t *fqrec, int qualtype, int length_threshold, int
     char *npos;
 
 	/* discard if the length of the sequence is less than the length threshold */
-    if (fqrec->seq.l < length_threshold) {
+    if (fqrec->seq.l < (size_t)length_threshold) {
 		retvals = (cutsites*) malloc (sizeof(cutsites));
 		retvals->three_prime_cut = -1;
 		retvals->five_prime_cut = -1;
@@ -61,7 +61,7 @@ cutsites* sliding_window (kseq_t *fqrec, int qualtype, int length_threshold, int
 		window_total += get_quality_num (fqrec->qual.s[i], qualtype, fqrec, i);
 	}
 
-	for (i=0; i <= fqrec->qual.l - window_size; i++) {
+	for (i=0; (size_t)i <= fqrec->qual.l - (size_t)window_size; i++) {
 
 		window_avg = (double)window_total / (double)window_size;
 
@@ -90,7 +90,7 @@ cutsites* sliding_window (kseq_t *fqrec, int qualtype, int length_threshold, int
 		/* if the average quality in the window is less than the threshold */
 		/* or if the window is the last window in the read */
 		if ((window_avg < qual_threshold || 
-			window_start+window_size > fqrec->qual.l) && (found_five_prime == 1 || no_fiveprime)) {
+			(size_t)(window_start+window_size) > fqrec->qual.l) && (found_five_prime == 1 || no_fiveprime)) {
 
 			/* at what point in the window does the quality dip below the threshold? */
 			for (j=window_start; j<window_start+window_size; j++) {
@@ -105,7 +105,7 @@ cutsites* sliding_window (kseq_t *fqrec, int qualtype, int length_threshold, int
 
 		/* instead of sliding the window, subtract the first qual and add the next qual */
 		window_total -= get_quality_num (fqrec->qual.s[window_start], qualtype, fqrec, window_start);
-		if (window_start+window_size < fqrec->qual.l) {
+		if ((size_t)(window_start+window_size) < fqrec->qual.l) {
 			window_total += get_quality_num (fqrec->qual.s[window_start+window_size], qualtype, fqrec, window_start+window_size);
 		}
 		window_start++;

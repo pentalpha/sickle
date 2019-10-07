@@ -4,6 +4,7 @@
 #include <zlib.h>
 #include <stdio.h>
 #include <getopt.h>
+#include <queue>
 #include "sickle.h"
 #include "kseq.h"
 #include "print_record.h"
@@ -30,7 +31,7 @@ static struct option single_long_options[] = {
     {NULL, 0, NULL, 0}
 };
 
-void single_usage(int status, char *msg) {
+void single_usage(int status, char const *msg) {
 
     fprintf(stderr, "\nUsage: %s se [options] -f <fastq sequence file> -t <quality type> -o <trimmed fastq file>\n\
 \n\
