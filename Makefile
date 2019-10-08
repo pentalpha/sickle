@@ -13,13 +13,13 @@ SDIR = src
 
 default: build
 
-sliding.o: $(SDIR)/sliding.cpp $(SDIR)/trim.h
+trim.o: $(SDIR)/trim.cpp $(SDIR)/trim.h
 	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
-trim_single.o: $(SDIR)/trim_single.cpp $(SDIR)/trim.h
+trim_single.o: $(SDIR)/trim_single.cpp $(SDIR)/trim_single.h
 	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
-trim_paired.o: $(SDIR)/trim_paired.cpp $(SDIR)/trim.h
+trim_paired.o: $(SDIR)/trim_paired.cpp $(SDIR)/trim_paired.h
 	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
 sickle.o: $(SDIR)/sickle.cpp $(SDIR)/sickle.h
@@ -43,9 +43,20 @@ distclean: clean
 dist:
 	tar -zcf $(ARCHIVE).tar.gz src Makefile README.md sickle.xml LICENSE
 
-build: GZReader.o FQEntry.o sliding.o trim_single.o trim_paired.o sickle.o print_record.o
+build: GZReader.o FQEntry.o trim.o trim_single.o trim_paired.o sickle.o print_record.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OPT) $? -o sickle $(LIBS)
 
 debug:
 	$(MAKE) build "CXXFLAGS=-Wall -pedantic -D__STDC_LIMIT_MACROS -g -DDEBUG"
+
+test_pe:
+	./sickle pe -f test/test.f.fastq -r test/test.r.fastq -t sanger\
+	 -o test/output/test_pe1.trim.fastq -p test/output/test_pe2.trim.fastq -s test/output/test_s.trim.fastq\
+	 -q 60 > test/output/test_pe.trim.txt
+
+test_pei:
+	./sickle pe -c test/test.fastq -t sanger -M test/output/test_pei.trim.fastq -q 60 > test/output/test_pei.trim.txt
+
+test_se:
+	./sickle se -f test/test.fastq -t sanger -o test/output/test.trim.fastq -q 60 > test/output/test.trim.txt
 

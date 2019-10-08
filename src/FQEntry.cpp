@@ -6,42 +6,17 @@
 using namespace std;
 
 FQEntry::FQEntry(int previous, GZReader *reader){
+    //msg("new fqentry");
     position = previous + 1;
-    this->name = reader->readline();
-    this->seq = reader->readline();
-    this->comment = reader->readline();
-    this->qual = reader->readline();
+    
+    std::string* strs = reader->read4();
+
+    this->name = strs[0];
+    this->seq = strs[1];
+    this->comment = strs[2];
+    this->qual = strs[3];
 
     validate();
-}
-
-void FQEntry::validate(){
-    string actual_seq = string("In ")+name+string("(line ")+to_string((position*4)-1)+string(")");
-    if(name.length() <= 1){
-        error(actual_seq);
-        error(string("Sequence ID is to short: ") + name);
-        exit(EXIT_FAILURE);
-    }
-
-    if(seq.length() < 1){
-        error(actual_seq);
-        error("Sequence line is empty");
-        exit(EXIT_FAILURE);
-    }
-
-    if(qual.length() < 1){
-        error(actual_seq);
-        error("Quality line is empty.");
-        exit(EXIT_FAILURE);
-    }
-
-    if(qual.length() != seq.length()){
-        error(actual_seq);
-        error("Sequence and quality lines have different lengths:");
-        error(seq);
-        error(qual);
-        exit(EXIT_FAILURE);
-    }
 }
 
 FQEntry::FQEntry(const FQEntry& other){
@@ -75,6 +50,41 @@ FQEntry::FQEntry(){
     this->seq = "";
     this->qual = "";
     this->comment = "";
+}
+
+void FQEntry::validate(){
+    string actual_seq = string("In ")+name+string("(line ")+to_string((position*4)-1)+string(")");
+    if(name.length() <= 1){
+        error(actual_seq);
+        error("Sequence ID is to short.");
+        error(string("ID:") + name);
+        error(string("Sequence: ") + seq);
+        error(string("Comment: ") + comment);
+        error(string("Qualities: ") + qual);
+        exit(EXIT_FAILURE);
+    }
+
+    if(seq.length() < 1){
+        error(actual_seq);
+        error("Sequence line is empty");
+        exit(EXIT_FAILURE);
+    }
+
+    if(qual.length() < 1){
+        error(actual_seq);
+        error("Quality line is empty.");
+        exit(EXIT_FAILURE);
+    }
+
+    if(qual.length() != seq.length()){
+        error(actual_seq);
+        error("Sequence and quality lines have different lengths:");
+        error(seq);
+        error(qual);
+        exit(EXIT_FAILURE);
+    }
+
+    //msg("FQEntry validated");
 }
 
 /*FQEntry::~FQEntry(){

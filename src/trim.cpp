@@ -1,42 +1,7 @@
-#include <assert.h>
-#include <ctype.h>
-#include <stdlib.h>
-#include <zlib.h>
-#include <stdio.h>
-#include <getopt.h>
-#include <iostream>
-#include "sickle.h"
-#include "FQEntry.h"
 #include "trim.h"
 
-int get_quality_num (char qualchar, int qualtype, FQEntry &fqrec, int pos) {
-  /* 
-     Return the adjusted quality, depending on quality type.
-
-     Note that this uses the array in sickle.h, which *approximates*
-     the SOLEXA (pre-1.3 pipeline) qualities as linear. This is
-     inaccurate with low-quality bases.
-  */
-
-  int qual_value = (int) qualchar;
-
-  if (qual_value < quality_constants[qualtype][Q_MIN] || qual_value > quality_constants[qualtype][Q_MAX]) {
-	fprintf (stderr, "ERROR: Quality value (%d) does not fall within correct range for %s encoding.\n", qual_value, typenames[qualtype]);
-	fprintf (stderr, "Range for %s encoding: %d-%d\n", typenames[qualtype], quality_constants[qualtype][Q_MIN], quality_constants[qualtype][Q_MAX]);
-	fprintf (stderr, "FastQ record: %s\n", fqrec.name.c_str());
-	fprintf (stderr, "Quality string: %s\n", fqrec.qual.c_str());
-	fprintf (stderr, "Quality char: '%c'\n", qualchar);
-	fprintf (stderr, "Quality position: %d\n", pos+1);
-	exit(1);
-  }
-
-  return (qual_value - quality_constants[qualtype][Q_OFFSET]);
-}
-
-
-cutsites* sliding_window (FQEntry &fqrec, int qualtype, int length_threshold, int qual_threshold, int no_fiveprime, int trunc_n, int debug) {
-
-	//std::cout << "Starting sliding window\n";
+cutsites* Abstract_Trimmer::sliding_window(FQEntry &fqrec){
+    //std::cout << "Starting sliding window\n";
 	if(fqrec.seq.length() == 0){
 		std::cout << "Sequence is empty!\n";
 	}
@@ -64,7 +29,7 @@ cutsites* sliding_window (FQEntry &fqrec, int qualtype, int length_threshold, in
 	/* then make the window size the length of the seq */
 	if (window_size == 0) window_size = fqrec.seq.length();
 	for (i=0; i<window_size; i++) {
-		window_total += get_quality_num (fqrec.qual.at(i), qualtype, fqrec, i);
+		window_total += get_quality_num (fqrec.qual.at(i), fqrec, i);
 	}
 	for (i=0; (size_t)i <= fqrec.qual.length() - (size_t)window_size; i++) {
 
@@ -79,7 +44,7 @@ cutsites* sliding_window (FQEntry &fqrec, int qualtype, int length_threshold, in
 
 			/* at what point in the window does the quality go above the threshold? */
 			for (j=window_start; j<window_start+window_size; j++) {
-				if (get_quality_num (fqrec.qual.at(j), qualtype, fqrec, j) >= qual_threshold) {
+				if (get_quality_num (fqrec.qual.at(j), fqrec, j) >= qual_threshold) {
 					five_prime_cut = j;
 					break;
 				}
@@ -93,12 +58,12 @@ cutsites* sliding_window (FQEntry &fqrec, int qualtype, int length_threshold, in
 		/* Finding the 3' cutoff */
 		/* if the average quality in the window is less than the threshold */
 		/* or if the window is the last window in the read */
-		if ((window_avg < qual_threshold || 
+		if ((window_avg < qual_threshold ||
 			(size_t)(window_start+window_size) > fqrec.qual.length()) && (found_five_prime == 1 || no_fiveprime)) {
 
 			/* at what point in the window does the quality dip below the threshold? */
 			for (j=window_start; j<window_start+window_size; j++) {
-				if (get_quality_num (fqrec.qual.at(j), qualtype, fqrec, j) < qual_threshold) {
+				if (get_quality_num (fqrec.qual.at(j), fqrec, j) < qual_threshold) {
 					three_prime_cut = j;
 					break;
 				}
@@ -108,9 +73,9 @@ cutsites* sliding_window (FQEntry &fqrec, int qualtype, int length_threshold, in
 		}
 
 		/* instead of sliding the window, subtract the first qual and add the next qual */
-		window_total -= get_quality_num (fqrec.qual.at(window_start), qualtype, fqrec, window_start);
+		window_total -= get_quality_num (fqrec.qual.at(window_start), fqrec, window_start);
 		if ((size_t)(window_start+window_size) < fqrec.qual.length()) {
-			window_total += get_quality_num (fqrec.qual.at(window_start+window_size), qualtype, fqrec, window_start+window_size);
+			window_total += get_quality_num (fqrec.qual.at(window_start+window_size), fqrec, window_start+window_size);
 		}
 		window_start++;
 	}
@@ -148,4 +113,28 @@ cutsites* sliding_window (FQEntry &fqrec, int qualtype, int length_threshold, in
 	retvals->three_prime_cut = three_prime_cut;
 	retvals->five_prime_cut = five_prime_cut;
 	return (retvals);
+}
+
+int Abstract_Trimmer::get_quality_num(char qualchar, FQEntry &fqrec, int pos){
+  /*
+     Return the adjusted quality, depending on quality type.
+
+     Note that this uses the array in sickle.h, which *approximates*
+     the SOLEXA (pre-1.3 pipeline) qualities as linear. This is
+     inaccurate with low-quality bases.
+  */
+
+  int qual_value = (int) qualchar;
+
+  if (qual_value < quality_constants[qualtype][Q_MIN] || qual_value > quality_constants[qualtype][Q_MAX]) {
+	fprintf (stderr, "ERROR: Quality value (%d) does not fall within correct range for %s encoding.\n", qual_value, typenames[qualtype]);
+	fprintf (stderr, "Range for %s encoding: %d-%d\n", typenames[qualtype], quality_constants[qualtype][Q_MIN], quality_constants[qualtype][Q_MAX]);
+	fprintf (stderr, "FastQ record: %s\n", fqrec.name.c_str());
+	fprintf (stderr, "Quality string: %s\n", fqrec.qual.c_str());
+	fprintf (stderr, "Quality char: '%c'\n", qualchar);
+	fprintf (stderr, "Quality position: %d\n", pos+1);
+	exit(1);
+  }
+
+  return (qual_value - quality_constants[qualtype][Q_OFFSET]);
 }

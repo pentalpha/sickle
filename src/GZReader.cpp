@@ -1,4 +1,5 @@
 #include <iostream>
+#include <stdexcept>
 #include "GZReader.h"
 
 
@@ -11,11 +12,15 @@ GZReader::GZReader(char* path){
     eof = false;
     buffer = "";
     tmp_buffer = new char[BUFFER_SIZE+1];
+    this->path = path;
 }
 
 GZReader::~GZReader(){
-    msg("destructing gzreader instance");
-    //gzclose(file);
+    //msg("destructing gzreader instance");
+    delete(path);
+    delete(tmp_buffer);
+    gzclose(file);
+    //msg("closed gzfile");
 }
 
 std::string GZReader::readline(){
@@ -24,7 +29,7 @@ std::string GZReader::readline(){
     {
         new_line_pos = buffer.find("\n");
         if(eof){
-            //msg("End of file, breaking loop.");
+            //msg("All data has been already read.");
             break;
         }
         if(new_line_pos == std::string::npos){
@@ -33,7 +38,7 @@ std::string GZReader::readline(){
             int n = more_buffer();
             //msg("read temp char buffer");
             buffer.append(tmp_buffer);
-            //msg("appended temp char buffer");
+            //msg("increased buffer");
             //delete(more);
             //msg("deleted temp char buffer");
         }
@@ -52,15 +57,34 @@ std::string GZReader::readline(){
         buffer = buffer.substr(new_line_pos+1, buffer.length());
         //msg(std::string("newbuffer:") + buffer);
     }
+    if(eof && buffer.length() == 1){
+        if(buffer[0] == '\n'){
+            buffer = "";
+        }
+    }
     return line;
 }
 
 std::string* GZReader::read4(){
     std::string* strings = new std::string[4];
+    string base_error = string("Number of lines in ") + string(path) + string(" not a multiple of 4.");
     strings[0] = readline();
+    if(strings[0].length() == 0){
+        throw EmptyStreamException("Reading from empty stream.");
+    }
     strings[1] = readline();
+    if(strings[1].length() == 0){
+        throw LoadException(base_error + string("\nLast line: ") + strings[0]);
+    }
     strings[2] = readline();
+    if(strings[2].length() == 0){
+        throw LoadException(base_error + string("\nLast line: ") + strings[1]);
+    }
     strings[3] = readline();
+    if(strings[3].length() == 0){
+        throw LoadException(base_error + string("\nLast line: ") + strings[2]);
+    }
+
     return strings;
 }
 
@@ -78,4 +102,12 @@ int GZReader::more_buffer(){
 
 bool GZReader::reached_end(){
     return eof && buffer.length() == 0;
+}
+
+LoadException::LoadException(const std::string& message){
+    this->message_ = message;
+}
+
+EmptyStreamException::EmptyStreamException(const std::string& message){
+    this->message_ = message;
 }

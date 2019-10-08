@@ -8,12 +8,8 @@
 #include <string.h>
 #include "FQEntry.h"
 #include "sickle.h"
-//#include "kseq.h"
 #include "print_record.h"
-#include "trim.h"
-
-int paired_qual_threshold = 20;
-int paired_length_threshold = 20;
+#include "trim_paired.h"
 
 static struct option paired_long_options[] = {
     {"qual-type", required_argument, 0, 't'},
@@ -36,7 +32,7 @@ static struct option paired_long_options[] = {
     {NULL, 0, NULL, 0}
 };
 
-void paired_usage (int status, char const *msg) {
+void Trim_Paired::usage (int status, char const *msg) {
 
     fprintf(stderr, "\nIf you have separate files for forward and reverse reads:\n");
     fprintf(stderr, "Usage: %s pe [options] -f <paired-end forward fastq file> -r <paired-end reverse fastq file> -t <quality type> -o <trimmed PE forward file> -p <trimmed PE reverse file> -s <trimmed singles file>\n\n", PROGRAM_NAME);
@@ -74,48 +70,46 @@ Global options\n\
     exit(status);
 }
 
+Trim_Paired::Trim_Paired(){
+    threads=DEFAULT_THREADS; //TODO: add thread number argument
+    batch_len=DEFAULT_BATCH_LEN; //TODO: add batch length argument
 
-int paired_main(int argc, char *argv[]) {
+    input = NULL;          /* forward input file handle */
+    input2 = NULL;          /* reverse input file handle */
+    input_inter = NULL;          /* combined input file handle */
+    outfile = NULL;      /* forward output file handle */
+    outfile2 = NULL;      /* reverse output file handle */
+    outfile_combo = NULL;         /* combined output file handle */
+    outfile_single = NULL;        /* single output file handle */
+    outfile_gzip = NULL;
+    outfile2_gzip = NULL;
+    combo_gzip = NULL;
+    single_gzip = NULL;
+    debug = 0;
+    qualtype = -1;
+    outfn = NULL;        /* forward file out name */
+    outfn2 = NULL;        /* reverse file out name */
+    outfnc = NULL;        /* combined file out name */
+    sfn = NULL;           /* single/combined file out name */
+    infn = NULL;         /* forward input filename */
+    infn2 = NULL;         /* reverse input filename */
+    infnc = NULL;         /* combined input filename */
 
-    GZReader* pe1 = NULL;          /* forward input file handle */
-    GZReader* pe2 = NULL;          /* reverse input file handle */
-    GZReader* pec = NULL;          /* combined input file handle */
-    int l1, l2;
-    FILE *outfile1 = NULL;      /* forward output file handle */
-    FILE *outfile2 = NULL;      /* reverse output file handle */
-    FILE *combo = NULL;         /* combined output file handle */
-    FILE *single = NULL;        /* single output file handle */
-    gzFile outfile1_gzip = NULL;
-    gzFile outfile2_gzip = NULL;
-    gzFile combo_gzip = NULL;
-    gzFile single_gzip = NULL;
-    int debug = 0;
+    length_threshold = 20;
+    qual_threshold = 20;
+    
+    quiet = 0;
+    no_fiveprime = 0;
+    trunc_n = 0;
+    gzip_output = 0;
+
+    combo_all = 0;
+    combo_s = 0;
+}
+
+int Trim_Paired::parse_args(int argc, char *argv[]){
     int optc;
     extern char *optarg;
-    int qualtype = -1;
-    cutsites *p1cut;
-    cutsites *p2cut;
-    char *outfn1 = NULL;        /* forward file out name */
-    char *outfn2 = NULL;        /* reverse file out name */
-    char *outfnc = NULL;        /* combined file out name */
-    char *sfn = NULL;           /* single/combined file out name */
-    char *infn1 = NULL;         /* forward input filename */
-    char *infn2 = NULL;         /* reverse input filename */
-    char *infnc = NULL;         /* combined input filename */
-    int kept_p = 0;
-    int discard_p = 0;
-    int kept_s1 = 0;
-    int kept_s2 = 0;
-    int discard_s1 = 0;
-    int discard_s2 = 0;
-    int quiet = 0;
-    int no_fiveprime = 0;
-    int trunc_n = 0;
-    int gzip_output = 0;
-    int combo_all=0;
-    int combo_s=0;
-    int total=0;
-
     while (1) {
         int option_index = 0;
         optc = getopt_long(argc, argv, "df:r:c:t:o:p:m:M:s:q:l:xng", paired_long_options, &option_index);
@@ -128,8 +122,8 @@ int paired_main(int argc, char *argv[]) {
                 break;
 
         case 'f':
-            infn1 = (char *) malloc(strlen(optarg) + 1);
-            strcpy(infn1, optarg);
+            infn = (char *) malloc(strlen(optarg) + 1);
+            strcpy(infn, optarg);
             break;
 
         case 'r':
@@ -153,8 +147,8 @@ int paired_main(int argc, char *argv[]) {
             break;
 
         case 'o':
-            outfn1 = (char *) malloc(strlen(optarg) + 1);
-            strcpy(outfn1, optarg);
+            outfn = (char *) malloc(strlen(optarg) + 1);
+            strcpy(outfn, optarg);
             break;
 
         case 'p':
@@ -180,16 +174,16 @@ int paired_main(int argc, char *argv[]) {
             break;
 
         case 'q':
-            paired_qual_threshold = atoi(optarg);
-            if (paired_qual_threshold < 0) {
+            qual_threshold = atoi(optarg);
+            if (qual_threshold < 0) {
                 fprintf(stderr, "Quality threshold must be >= 0\n");
                 return EXIT_FAILURE;
             }
             break;
 
         case 'l':
-            paired_length_threshold = atoi(optarg);
-            if (paired_length_threshold < 0) {
+            length_threshold = atoi(optarg);
+            if (length_threshold < 0) {
                 fprintf(stderr, "Length threshold must be >= 0\n");
                 return EXIT_FAILURE;
             }
@@ -215,41 +209,342 @@ int paired_main(int argc, char *argv[]) {
             debug = 1;
             break;
 
-        case_GETOPT_HELP_CHAR(paired_usage);
+        case_GETOPT_HELP_CHAR(usage);
         case_GETOPT_VERSION_CHAR(PROGRAM_NAME, VERSION, AUTHORS);
 
         case '?':
-            paired_usage(EXIT_FAILURE, NULL);
+            usage(EXIT_FAILURE, NULL);
             break;
 
         default:
-            paired_usage(EXIT_FAILURE, NULL);
+            usage(EXIT_FAILURE, NULL);
             break;
         }
     }
 
     /* required: qualtype */
     if (qualtype == -1) {
-        paired_usage(EXIT_FAILURE, "****Error: Quality type is required.");
+        usage(EXIT_FAILURE, "****Error: Quality type is required.");
+        return EXIT_FAILURE;
     }
 
     /* make sure minimum input filenames are specified */
-    if (!infn1 && !infnc) {
-        paired_usage(EXIT_FAILURE, "****Error: Must have either -f OR -c argument.");
+    if (!infn && !infnc) {
+        usage(EXIT_FAILURE, "****Error: Must have either -f OR -c argument.");
+        return EXIT_FAILURE;
+    }
+    return 0;
+}
+
+int Trim_Paired::trim_main() {
+    total=0;
+    kept_p = 0;
+    discard_p = 0;
+    kept_s1 = 0;
+    kept_s2 = 0;
+    discard_s1 = 0;
+    discard_s2 = 0;
+
+    int res = init_streams();
+    if(res != 0){
+        return res;
     }
 
+    std::vector<std::queue<FQEntry*>* > queues;
+    std::vector<std::queue<FQEntry*>* > queues2;
+    std::vector<long> queue_lens;
+    std::vector<long> queue_lens2;
+    for (int i = 0; i < threads; i++){
+        queues.push_back(new std::queue<FQEntry*>());
+        queue_lens.push_back(0);
+    }
+    for (int i = 0; i < threads; i++){
+        queues2.push_back(new std::queue<FQEntry*>());
+        queue_lens2.push_back(0);
+    }
+
+    while(true){
+        msg("Reading new batch");
+        long chars_read_for_queue = 0;
+        long chars_read_for_queue2 = 0;
+        int max_queue_len = batch_len / threads;
+        while(true){
+            if(!input_inter){
+                if(chars_read_for_queue > batch_len){
+                    break;
+                }
+            }else{
+                if(chars_read_for_queue > batch_len || chars_read_for_queue2 > batch_len){
+                    break;
+                }
+            }
+
+            //msg("Reading read1");
+            //if(input == NULL) msg("input1 is null");
+            FQEntry* fqrec;
+            
+            if(!input->reached_end()){
+                //msg("Reading from input1");
+                try{
+                    fqrec = new FQEntry(0, input);
+                }catch(LoadException &ex){
+                    error(ex.what());
+                    break;
+                }catch(EmptyStreamException &ex){
+                    //error(ex.what());
+                    break;
+                }
+            }else{
+                //msg("End of input1");
+                if(!input_inter){
+                    if(!input2->reached_end()){
+                        fprintf(stderr, "Warning: PE file 1 is shorter than PE file 2. Disregarding rest of PE file 2.\n");
+                    }
+                }
+                break;
+            }
+
+            //msg("Reading read2");
+            FQEntry* fqrec2;
+            if (input_inter) {
+                if(!input->reached_end()){
+                    try{
+                        fqrec2 = new FQEntry(0, input);
+                    }catch(LoadException &ex){
+                        error(ex.what());
+                        break;
+                    }catch(EmptyStreamException &ex){
+                        //error(ex.what());
+                        break;
+                    }
+                }else{
+                    fprintf(stderr, "Warning: Interleaved PE file has uneven number of lines. Disregarding the last line.\n");
+                    break;
+                }
+            }else{
+                if(!input2->reached_end()){
+                    try{
+                        fqrec2 = new FQEntry(0, input2);
+                    }catch(LoadException &ex){
+                        error(ex.what());
+                        break;
+                    }catch(EmptyStreamException &ex){
+                        //error(ex.what());
+                        break;
+                    }
+                }else{
+                    fprintf(stderr, "Warning: PE file 2 is shorter than PE file 1. Disregarding rest of PE file 1.\n");
+                    break;
+                }
+            }
+
+            //msg("Reads read");
+
+            int read_len = fqrec->seq.length();
+            int read_len2 = fqrec2->seq.length();
+            chars_read_for_queue += read_len;
+            chars_read_for_queue2 += read_len2;
+
+            int smallest_queue = 0;
+            bool fitted_in_a_queue = false;
+
+            //msg("Looking for queue to fit read into it");
+            for(unsigned i = 0; i < queues.size(); i++){
+                std::queue<FQEntry*>* queue = queues[i];
+                std::queue<FQEntry*>* queue2 = queues2[i];
+                if(queue_lens[i] + read_len < max_queue_len){
+                    queue->push(fqrec);
+                    queue_lens[i] += read_len;
+                    queue2->push(fqrec2);
+                    queue_lens2[i] += read_len2;
+
+                    fitted_in_a_queue = true;
+                }
+                if(queue_lens[i] < queue_lens[smallest_queue]){
+                    smallest_queue = i;
+                }
+                if(fitted_in_a_queue) break;
+            }
+
+            if(!fitted_in_a_queue){
+                queues[smallest_queue]->push(fqrec);
+                queue_lens[smallest_queue] += read_len;
+
+                queues2[smallest_queue]->push(fqrec2);
+                queue_lens2[smallest_queue] += read_len2;
+            }
+            //msg("Stored read");
+        }
+        msg("Finished reading batch");
+
+        if(chars_read_for_queue == 0){
+            msg("Empty batch, finishing program.");
+            break;
+        }else{
+            msg("Processing threads:");
+            msg(to_string(threads));
+            for(int thread_n = 0; thread_n < threads; thread_n++){
+                processing_thread(queues[thread_n], queues2[thread_n], thread_n);
+            }
+        }
+    }
+
+    if (!quiet) {
+        if (infn && infn2) fprintf(stdout, "\nPE forward file: %s\nPE reverse file: %s\n", infn, infn2);
+        if (infnc) fprintf(stdout, "\nPE interleaved file: %s\n", infnc);
+        fprintf(stdout, "\nTotal input FastQ records: %d (%d pairs)\n", total, (total / 2));
+        fprintf(stdout, "\nFastQ paired records kept: %d (%d pairs)\n", kept_p, (kept_p / 2));
+        if (input_inter) fprintf(stdout, "FastQ single records kept: %d\n", (kept_s1 + kept_s2));
+        else fprintf(stdout, "FastQ single records kept: %d (from PE1: %d, from PE2: %d)\n", (kept_s1 + kept_s2), kept_s1, kept_s2);
+
+        fprintf(stdout, "FastQ paired records discarded: %d (%d pairs)\n", discard_p, (discard_p / 2));
+
+        if (input_inter) fprintf(stdout, "FastQ single records discarded: %d\n\n", (discard_s1 + discard_s2));
+        else fprintf(stdout, "FastQ single records discarded: %d (from PE1: %d, from PE2: %d)\n\n", (discard_s1 + discard_s2), discard_s1, discard_s2);
+    }
+
+    close_streams();
+
+    return EXIT_SUCCESS;
+}
+
+void Trim_Paired::processing_thread(std::queue<FQEntry*>* local_queue, std::queue<FQEntry*>* local_queue2, int thread_n){
+    assert(local_queue != NULL && local_queue2 != NULL);
+
+    msg(string("Processing thread ") + to_string(thread_n) + string(", read pairs: ") + to_string(local_queue->size()));
+    FQEntry* fqrec1;
+    FQEntry* fqrec2;
+
+    assert(local_queue2->size() == local_queue->size());
+
+    while (!local_queue->empty()) {
+        //msg("Retrieving reads from queues");
+        fqrec1 = local_queue->front();
+        local_queue->pop();
+        fqrec2 = local_queue2->front();
+        local_queue2->pop();
+
+        //msg("Sliding reads");
+        cutsites *p1cut = sliding_window(*fqrec1);
+        cutsites *p2cut = sliding_window(*fqrec2);
+        total += 2;
+
+        if (debug) printf("p1cut: %d,%d\n", p1cut->five_prime_cut, p1cut->three_prime_cut);
+        if (debug) printf("p2cut: %d,%d\n", p2cut->five_prime_cut, p2cut->three_prime_cut);
+
+        //msg("Outputing");
+        output_paired(fqrec1, fqrec2, p1cut, p2cut);
+
+        free(p1cut);
+        free(p2cut);
+        free(fqrec1);
+        free(fqrec2);
+    }
+}
+
+void Trim_Paired::output_paired(FQEntry* fqrec1, FQEntry* fqrec2, cutsites *p1cut, cutsites *p2cut){
+    /* The sequence and quality print statements below print out the sequence string starting from the 5' cut */
+        /* and then only print out to the 3' cut, however, we need to adjust the 3' cut */
+        /* by subtracting the 5' cut because the 3' cut was calculated on the original sequence */
+
+        /* if both sequences passed quality and length filters, then output both records */
+        if (p1cut->three_prime_cut >= 0 && p2cut->three_prime_cut >= 0) {
+            if (!gzip_output) {
+                if (input_inter) {
+                    print_record (outfile_combo, *fqrec1, p1cut);
+                    print_record (outfile_combo, *fqrec2, p2cut);
+                } else {
+                    print_record (outfile, *fqrec1, p1cut);
+                    print_record (outfile2, *fqrec2, p2cut);
+                }
+            } else {
+                if (input_inter) {
+                    print_record_gzip (combo_gzip, *fqrec1, p1cut);
+                    print_record_gzip (combo_gzip, *fqrec2, p2cut);
+                } else {
+                    print_record_gzip (outfile_gzip, *fqrec1, p1cut);
+                    print_record_gzip (outfile2_gzip, *fqrec2, p2cut);
+                }
+            }
+
+            kept_p += 2;
+        }
+
+        /* if only one sequence passed filter, then put its record in singles and discard the other */
+        /* or put an "N" record in if that option was chosen. */
+        else if (p1cut->three_prime_cut >= 0 && p2cut->three_prime_cut < 0) {
+            if (!gzip_output) {
+                if (combo_all) {
+                    print_record (outfile_combo, *fqrec1, p1cut);
+                    print_record_N (outfile_combo, *fqrec2, qualtype);
+                } else {
+                    print_record (outfile_single, *fqrec1, p1cut);
+                }
+            } else {
+                if (combo_all) {
+                    print_record_gzip (combo_gzip, *fqrec1, p1cut);
+                    print_record_N_gzip (combo_gzip, *fqrec2, qualtype);
+                } else {
+                    print_record_gzip (single_gzip, *fqrec1, p1cut);
+                }
+            }
+
+            kept_s1++;
+            discard_s2++;
+        }
+
+        else if (p1cut->three_prime_cut < 0 && p2cut->three_prime_cut >= 0) {
+            if (!gzip_output) {
+                if (combo_all) {
+                    print_record_N (outfile_combo, *fqrec1, qualtype);
+                    print_record (outfile_combo, *fqrec2, p2cut);
+                } else {
+                    print_record (outfile_single, *fqrec2, p2cut);
+                }
+            } else {
+                if (combo_all) {
+                    print_record_N_gzip (combo_gzip, *fqrec1, qualtype);
+                    print_record_gzip (combo_gzip, *fqrec2, p2cut);
+                } else {
+                    print_record_gzip (single_gzip, *fqrec2, p2cut);
+                }
+            }
+
+            kept_s2++;
+            discard_s1++;
+        } else {
+            /* If both records are to be discarded, but the -M option */
+            /* is being used, then output two "N" records */
+            if (combo_all) {
+                if (!gzip_output) {
+                    print_record_N (outfile_combo, *fqrec1, qualtype);
+                    print_record_N (outfile_combo, *fqrec2, qualtype);
+                } else {
+                    print_record_N_gzip (combo_gzip, *fqrec1, qualtype);
+                    print_record_N_gzip (combo_gzip, *fqrec2, qualtype);
+                }
+            }
+
+            discard_p += 2;
+        }
+}
+
+int Trim_Paired::init_streams(){
     if (infnc) {      /* using combined input file */
 
-        if (infn1 || infn2 || outfn1 || outfn2) {
-            paired_usage(EXIT_FAILURE, "****Error: Cannot have -f, -r, -o, or -p options with -c.");
+        if (infn || infn2 || outfn || outfn2) {
+            usage(EXIT_FAILURE, "****Error: Cannot have -f, -r, -o, or -p options with -c.");
+            return EXIT_FAILURE;
         }
 
         if ((combo_all && combo_s) || (!combo_all && !combo_s)) {
-            paired_usage(EXIT_FAILURE, "****Error: Must have only one of either -m or -M options with -c.");
+            usage(EXIT_FAILURE, "****Error: Must have only one of either -m or -M options with -c.");
+            return EXIT_FAILURE;
         }
 
         if ((combo_s && !sfn) || (combo_all && sfn)) {
-            paired_usage(EXIT_FAILURE, "****Error: -m option must have -s option, and -M option cannot have -s option.");
+            usage(EXIT_FAILURE, "****Error: -m option must have -s option, and -M option cannot have -s option.");
+            return EXIT_FAILURE;
         }
 
         /* check for duplicate file names */
@@ -260,8 +555,8 @@ int paired_main(int argc, char *argv[]) {
 
         /* get combined output file */
         if (!gzip_output) {
-            combo = fopen(outfnc, "w");
-            if (!combo) {
+            outfile_combo = fopen(outfnc, "w");
+            if (!outfile_combo) {
                 fprintf(stderr, "****Error: Could not open combo output file '%s'.\n\n", outfnc);
                 return EXIT_FAILURE;
             }
@@ -273,46 +568,49 @@ int paired_main(int argc, char *argv[]) {
             }
         }
 
-        pec = new GZReader(infnc);
-        if (!pec) {
+        input_inter = new GZReader(infnc);
+        if (!input_inter) {
             fprintf(stderr, "****Error: Could not open combined input file '%s'.\n\n", infnc);
             return EXIT_FAILURE;
         }
+        input = input_inter;
 
     } else {     /* using forward and reverse input files */
 
-        if (infn1 && (!infn2 || !outfn1 || !outfn2 || !sfn)) {
-            paired_usage(EXIT_FAILURE, "****Error: Using the -f option means you must have the -r, -o, -p, and -s options.");
+        if (infn && (!infn2 || !outfn || !outfn2 || !sfn)) {
+            usage(EXIT_FAILURE, "****Error: Using the -f option means you must have the -r, -o, -p, and -s options.");
+            return EXIT_FAILURE;
         }
 
-        if (infn1 && (infnc || combo_all || combo_s)) {
-            paired_usage(EXIT_FAILURE, "****Error: The -f option cannot be used in combination with -c, -m, or -M.");
+        if (infn && (infnc || combo_all || combo_s)) {
+            usage(EXIT_FAILURE, "****Error: The -f option cannot be used in combination with -c, -m, or -M.");
+            return EXIT_FAILURE;
         }
 
-        if (!strcmp(infn1, infn2) || !strcmp(infn1, outfn1) || !strcmp(infn1, outfn2) ||
-            !strcmp(infn1, sfn) || !strcmp(infn2, outfn1) || !strcmp(infn2, outfn2) || 
-            !strcmp(infn2, sfn) || !strcmp(outfn1, outfn2) || !strcmp(outfn1, sfn) || !strcmp(outfn2, sfn)) {
+        if (!strcmp(infn, infn2) || !strcmp(infn, outfn) || !strcmp(infn, outfn2) ||
+            !strcmp(infn, sfn) || !strcmp(infn2, outfn) || !strcmp(infn2, outfn2) || 
+            !strcmp(infn2, sfn) || !strcmp(outfn, outfn2) || !strcmp(outfn, sfn) || !strcmp(outfn2, sfn)) {
 
             fprintf(stderr, "****Error: Duplicate input and/or output file names.\n\n");
             return EXIT_FAILURE;
         }
 
-        pe1 = new GZReader(infn1);
-        if (!pe1) {
-            fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn1);
+        input = new GZReader(infn);
+        if (!input) {
+            fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn);
             return EXIT_FAILURE;
         }
 
-        pe2 = new GZReader(infn2);
-        if (!pe2) {
+        input2 = new GZReader(infn2);
+        if (!input2) {
             fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn2);
             return EXIT_FAILURE;
         }
 
         if (!gzip_output) {
-            outfile1 = fopen(outfn1, "w");
-            if (!outfile1) {
-                fprintf(stderr, "****Error: Could not open output file '%s'.\n\n", outfn1);
+            outfile = fopen(outfn, "w");
+            if (!outfile) {
+                fprintf(stderr, "****Error: Could not open output file '%s'.\n\n", outfn);
                 return EXIT_FAILURE;
             }
 
@@ -322,9 +620,9 @@ int paired_main(int argc, char *argv[]) {
                 return EXIT_FAILURE;
             }
         } else {
-            outfile1_gzip = gzopen(outfn1, "w");
-            if (!outfile1_gzip) {
-                fprintf(stderr, "****Error: Could not open output file '%s'.\n\n", outfn1);
+            outfile_gzip = gzopen(outfn, "w");
+            if (!outfile_gzip) {
+                fprintf(stderr, "****Error: Could not open output file '%s'.\n\n", outfn);
                 return EXIT_FAILURE;
             }
 
@@ -340,8 +638,8 @@ int paired_main(int argc, char *argv[]) {
     /* get singles output file handle */
     if (sfn && !combo_all) {
         if (!gzip_output) {
-            single = fopen(sfn, "w");
-            if (!single) {
+            outfile_single = fopen(sfn, "w");
+            if (!outfile_single) {
                 fprintf(stderr, "****Error: Could not open single output file '%s'.\n\n", sfn);
                 return EXIT_FAILURE;
             }
@@ -354,176 +652,45 @@ int paired_main(int argc, char *argv[]) {
         }
     }
 
-    FQEntry fqrec1, fqrec2;
-    if (pec) {
-        fqrec1 = FQEntry(0, pec);
-        fqrec2 = FQEntry(fqrec1.position, pec);
+    return 0;
+}
+
+void Trim_Paired::close_streams(){
+    //msg("Closing paired end streams");
+    if (input_inter) {
+        //msg("Deleting interleaved reader");
+        delete(input_inter);
     } else {
-        fqrec1 = FQEntry(0, pe1);
-        fqrec2 = FQEntry(0, pe2);
+        //msg("Deleting paired readers");
+        delete(input);
+        delete(input2);
+    }
+    //msg("Deleted readers");
+
+    if(single_gzip){
+        gzclose(single_gzip);
+    }
+    if(outfile_single){
+        fclose(outfile_single);
+    }
+    //msg("Deleted single outputs");
+
+    if(combo_gzip){
+        gzclose(combo_gzip);
+    }
+    if(outfile_combo){
+        fclose(outfile_combo);
     }
 
-    while (true) {
+    //msg("Deleted combo outputs");
 
-        p1cut = sliding_window(fqrec1, qualtype, paired_length_threshold, paired_qual_threshold, no_fiveprime, trunc_n, debug);
-        p2cut = sliding_window(fqrec2, qualtype, paired_length_threshold, paired_qual_threshold, no_fiveprime, trunc_n, debug);
-        total += 2;
-
-        if (debug) printf("p1cut: %d,%d\n", p1cut->five_prime_cut, p1cut->three_prime_cut);
-        if (debug) printf("p2cut: %d,%d\n", p2cut->five_prime_cut, p2cut->three_prime_cut);
-
-        /* The sequence and quality print statements below print out the sequence string starting from the 5' cut */
-        /* and then only print out to the 3' cut, however, we need to adjust the 3' cut */
-        /* by subtracting the 5' cut because the 3' cut was calculated on the original sequence */
-
-        /* if both sequences passed quality and length filters, then output both records */
-        if (p1cut->three_prime_cut >= 0 && p2cut->three_prime_cut >= 0) {
-            if (!gzip_output) {
-                if (pec) {
-                    print_record (combo, fqrec1, p1cut);
-                    print_record (combo, fqrec2, p2cut);
-                } else {
-                    print_record (outfile1, fqrec1, p1cut);
-                    print_record (outfile2, fqrec2, p2cut);
-                }
-            } else {
-                if (pec) {
-                    print_record_gzip (combo_gzip, fqrec1, p1cut);
-                    print_record_gzip (combo_gzip, fqrec2, p2cut);
-                } else {
-                    print_record_gzip (outfile1_gzip, fqrec1, p1cut);
-                    print_record_gzip (outfile2_gzip, fqrec2, p2cut);
-                }
-            }
-
-            kept_p += 2;
-        }
-
-        /* if only one sequence passed filter, then put its record in singles and discard the other */
-        /* or put an "N" record in if that option was chosen. */
-        else if (p1cut->three_prime_cut >= 0 && p2cut->three_prime_cut < 0) {
-            if (!gzip_output) {
-                if (combo_all) {
-                    print_record (combo, fqrec1, p1cut);
-                    print_record_N (combo, fqrec2, qualtype);
-                } else {
-                    print_record (single, fqrec1, p1cut);
-                }
-            } else {
-                if (combo_all) {
-                    print_record_gzip (combo_gzip, fqrec1, p1cut);
-                    print_record_N_gzip (combo_gzip, fqrec2, qualtype);
-                } else {
-                    print_record_gzip (single_gzip, fqrec1, p1cut);
-                }
-            }
-
-            kept_s1++;
-            discard_s2++;
-        }
-
-        else if (p1cut->three_prime_cut < 0 && p2cut->three_prime_cut >= 0) {
-            if (!gzip_output) {
-                if (combo_all) {
-                    print_record_N (combo, fqrec1, qualtype);
-                    print_record (combo, fqrec2, p2cut);
-                } else {
-                    print_record (single, fqrec2, p2cut);
-                }
-            } else {
-                if (combo_all) {
-                    print_record_N_gzip (combo_gzip, fqrec1, qualtype);
-                    print_record_gzip (combo_gzip, fqrec2, p2cut);
-                } else {
-                    print_record_gzip (single_gzip, fqrec2, p2cut);
-                }
-            }
-
-            kept_s2++;
-            discard_s1++;
-
-        } else {
-
-            /* If both records are to be discarded, but the -M option */
-            /* is being used, then output two "N" records */
-            if (combo_all) {
-                if (!gzip_output) {
-                    print_record_N (combo, fqrec1, qualtype);
-                    print_record_N (combo, fqrec2, qualtype);
-                } else {
-                    print_record_N_gzip (combo_gzip, fqrec1, qualtype);
-                    print_record_N_gzip (combo_gzip, fqrec2, qualtype);
-                }
-            }
-
-            discard_p += 2;
-        }
-
-        free(p1cut);
-        free(p2cut);
-        if(pec != NULL){
-            if(pec->reached_end()){
-                break;
-            }else{
-                fqrec1 = FQEntry(fqrec1.position, pec);
-                fqrec2 = FQEntry(fqrec2.position, pec);
-            }
-        }else{
-            if(pe1->reached_end() && pe2->reached_end()){
-                break;
-            }else if(pe1->reached_end()){
-                fprintf(stderr, "Warning: PE file 1 is shorter than PE file 2. Disregarding rest of PE file 2.\n");
-                break;
-            }else if(pe2->reached_end()){
-                fprintf(stderr, "Warning: PE file 2 is shorter than PE file 1. Disregarding rest of PE file 1.\n");
-                break;
-            }else{
-                fqrec1 = FQEntry(fqrec1.position, pe1);
-                fqrec1 = FQEntry(fqrec1.position, pe2);
-            }
-        }
-    }
-
-    if (!quiet) {
-        if (infn1 && infn2) fprintf(stdout, "\nPE forward file: %s\nPE reverse file: %s\n", infn1, infn2);
-        if (infnc) fprintf(stdout, "\nPE interleaved file: %s\n", infnc);
-        fprintf(stdout, "\nTotal input FastQ records: %d (%d pairs)\n", total, (total / 2));
-        fprintf(stdout, "\nFastQ paired records kept: %d (%d pairs)\n", kept_p, (kept_p / 2));
-        if (pec) fprintf(stdout, "FastQ single records kept: %d\n", (kept_s1 + kept_s2));
-        else fprintf(stdout, "FastQ single records kept: %d (from PE1: %d, from PE2: %d)\n", (kept_s1 + kept_s2), kept_s1, kept_s2);
-
-        fprintf(stdout, "FastQ paired records discarded: %d (%d pairs)\n", discard_p, (discard_p / 2));
-
-        if (pec) fprintf(stdout, "FastQ single records discarded: %d\n\n", (discard_s1 + discard_s2));
-        else fprintf(stdout, "FastQ single records discarded: %d (from PE1: %d, from PE2: %d)\n\n", (discard_s1 + discard_s2), discard_s1, discard_s2);
-    }
-
-    //kseq_destroy(fqrec1);
-    //delete(fqrec1);
-    //delete(fqrec2);
-    //if (pec) free(fqrec2);
-    //else kseq_destroy(fqrec2);
-
-    if (sfn && !combo_all) {
-        if (!gzip_output) fclose(single);
-        else gzclose(single_gzip);
-    }
-
-    if (pec) {
-        delete(pec);
-        if (!gzip_output) fclose(combo);
-        else gzclose(combo_gzip);
+    if (!gzip_output) {
+        if(outfile) fclose(outfile);
+        if(outfile2) fclose(outfile2);
     } else {
-        delete(pe1);
-        delete(pe2);
-        if (!gzip_output) {
-            fclose(outfile1);
-            fclose(outfile2);
-        } else {
-            gzclose(outfile1_gzip);
-            gzclose(outfile2_gzip);
-        }
+        if(outfile_gzip) gzclose(outfile_gzip);
+        if(outfile2_gzip) gzclose(outfile2_gzip);
     }
 
-    return EXIT_SUCCESS;
-}                               /* end of paired_main() */
+    msg("Closed all streams");
+}

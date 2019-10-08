@@ -19,6 +19,14 @@
 #define VERSION 0.0
 #endif
 
+#ifndef DEFAULT_THREADS
+#define DEFAULT_THREADS 1
+#endif
+
+#ifndef DEFAULT_BATCH_LEN
+#define DEFAULT_BATCH_LEN 1024*1024
+#endif
+
 /* Options drawn from GNU's coreutils/src/system.h */
 /* These options are defined so as to avoid conflicting with option
 values used by commands */
