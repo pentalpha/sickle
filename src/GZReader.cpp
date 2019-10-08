@@ -10,6 +10,7 @@ GZReader::GZReader(char* path){
     }
     eof = false;
     buffer = "";
+    tmp_buffer = new char[BUFFER_SIZE+1];
 }
 
 GZReader::~GZReader(){
@@ -27,13 +28,13 @@ std::string GZReader::readline(){
             break;
         }
         if(new_line_pos == std::string::npos){
-            char* more = new char[BUFFER_SIZE+1];
+            //char* more
             //msg("allocated temp char buffer");
-            int n = more_buffer(more);
+            int n = more_buffer();
             //msg("read temp char buffer");
-            buffer.append(more);
+            buffer.append(tmp_buffer);
             //msg("appended temp char buffer");
-            delete(more);
+            //delete(more);
             //msg("deleted temp char buffer");
         }
     }
@@ -63,15 +64,15 @@ std::string* GZReader::read4(){
     return strings;
 }
 
-int GZReader::more_buffer(char * more){
-    int chars_read = gzread(file, more, BUFFER_SIZE);
+int GZReader::more_buffer(){
+    int chars_read = gzread(file, tmp_buffer, BUFFER_SIZE);
     if(chars_read < BUFFER_SIZE){
         eof = true;
     }else if(chars_read > BUFFER_SIZE){
         error("MORE CHARACTERS READ THAN BUFFER SIZE!");
         exit(EXIT_FAILURE);
     }
-    more[chars_read] = '\0';
+    tmp_buffer[chars_read] = '\0';
     return chars_read;
 }
 

@@ -15,10 +15,11 @@ public:
     std::string* read4();
     bool reached_end();
 private:
-    int more_buffer(char * more);
+    int more_buffer();
     std::string buffer;
     gzFile file;
     bool eof;
+    char* tmp_buffer;
 };
 
 #endif
