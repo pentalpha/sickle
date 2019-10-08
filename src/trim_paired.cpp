@@ -5,13 +5,12 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <unistd.h>
+#include <string.h>
+#include "FQEntry.h"
 #include "sickle.h"
-#include "kseq.h"
+//#include "kseq.h"
 #include "print_record.h"
-
-__KS_GETC(gzread, BUFFER_SIZE)
-__KS_GETUNTIL(gzread, BUFFER_SIZE)
-__KSEQ_READ
+#include "trim.h"
 
 int paired_qual_threshold = 20;
 int paired_length_threshold = 20;
@@ -78,11 +77,9 @@ Global options\n\
 
 int paired_main(int argc, char *argv[]) {
 
-    gzFile pe1 = NULL;          /* forward input file handle */
-    gzFile pe2 = NULL;          /* reverse input file handle */
-    gzFile pec = NULL;          /* combined input file handle */
-    kseq_t *fqrec1 = NULL;
-    kseq_t *fqrec2 = NULL;
+    GZReader* pe1 = NULL;          /* forward input file handle */
+    GZReader* pe2 = NULL;          /* reverse input file handle */
+    GZReader* pec = NULL;          /* combined input file handle */
     int l1, l2;
     FILE *outfile1 = NULL;      /* forward output file handle */
     FILE *outfile2 = NULL;      /* reverse output file handle */
@@ -276,7 +273,7 @@ int paired_main(int argc, char *argv[]) {
             }
         }
 
-        pec = gzopen(infnc, "r");
+        pec = new GZReader(infnc);
         if (!pec) {
             fprintf(stderr, "****Error: Could not open combined input file '%s'.\n\n", infnc);
             return EXIT_FAILURE;
@@ -300,13 +297,13 @@ int paired_main(int argc, char *argv[]) {
             return EXIT_FAILURE;
         }
 
-        pe1 = gzopen(infn1, "r");
+        pe1 = new GZReader(infn1);
         if (!pe1) {
             fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn1);
             return EXIT_FAILURE;
         }
 
-        pe2 = gzopen(infn2, "r");
+        pe2 = new GZReader(infn2);
         if (!pe2) {
             fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn2);
             return EXIT_FAILURE;
@@ -357,22 +354,16 @@ int paired_main(int argc, char *argv[]) {
         }
     }
 
+    FQEntry fqrec1, fqrec2;
     if (pec) {
-        fqrec1 = kseq_init(pec);
-        fqrec2 = (kseq_t *) malloc(sizeof(kseq_t));
-        fqrec2->f = fqrec1->f;
+        fqrec1 = FQEntry(0, pec);
+        fqrec2 = FQEntry(fqrec1.position, pec);
     } else {
-        fqrec1 = kseq_init(pe1);
-        fqrec2 = kseq_init(pe2);
+        fqrec1 = FQEntry(0, pe1);
+        fqrec2 = FQEntry(0, pe2);
     }
 
-    while ((l1 = kseq_read(fqrec1)) >= 0) {
-
-        l2 = kseq_read(fqrec2);
-        if (l2 < 0) {
-            fprintf(stderr, "Warning: PE file 2 is shorter than PE file 1. Disregarding rest of PE file 1.\n");
-            break;
-        }
+    while (true) {
 
         p1cut = sliding_window(fqrec1, qualtype, paired_length_threshold, paired_qual_threshold, no_fiveprime, trunc_n, debug);
         p2cut = sliding_window(fqrec2, qualtype, paired_length_threshold, paired_qual_threshold, no_fiveprime, trunc_n, debug);
@@ -470,12 +461,26 @@ int paired_main(int argc, char *argv[]) {
 
         free(p1cut);
         free(p2cut);
-    }             /* end of while ((l1 = kseq_read (fqrec1)) >= 0) */
-
-    if (l1 < 0) {
-        l2 = kseq_read(fqrec2);
-        if (l2 >= 0) {
-            fprintf(stderr, "Warning: PE file 1 is shorter than PE file 2. Disregarding rest of PE file 2.\n");
+        if(pec != NULL){
+            if(pec->reached_end()){
+                break;
+            }else{
+                fqrec1 = FQEntry(fqrec1.position, pec);
+                fqrec2 = FQEntry(fqrec2.position, pec);
+            }
+        }else{
+            if(pe1->reached_end() && pe2->reached_end()){
+                break;
+            }else if(pe1->reached_end()){
+                fprintf(stderr, "Warning: PE file 1 is shorter than PE file 2. Disregarding rest of PE file 2.\n");
+                break;
+            }else if(pe2->reached_end()){
+                fprintf(stderr, "Warning: PE file 2 is shorter than PE file 1. Disregarding rest of PE file 1.\n");
+                break;
+            }else{
+                fqrec1 = FQEntry(fqrec1.position, pe1);
+                fqrec1 = FQEntry(fqrec1.position, pe2);
+            }
         }
     }
 
@@ -493,9 +498,11 @@ int paired_main(int argc, char *argv[]) {
         else fprintf(stdout, "FastQ single records discarded: %d (from PE1: %d, from PE2: %d)\n\n", (discard_s1 + discard_s2), discard_s1, discard_s2);
     }
 
-    kseq_destroy(fqrec1);
-    if (pec) free(fqrec2);
-    else kseq_destroy(fqrec2);
+    //kseq_destroy(fqrec1);
+    //delete(fqrec1);
+    //delete(fqrec2);
+    //if (pec) free(fqrec2);
+    //else kseq_destroy(fqrec2);
 
     if (sfn && !combo_all) {
         if (!gzip_output) fclose(single);
@@ -503,12 +510,12 @@ int paired_main(int argc, char *argv[]) {
     }
 
     if (pec) {
-        gzclose(pec);
+        delete(pec);
         if (!gzip_output) fclose(combo);
         else gzclose(combo_gzip);
     } else {
-        gzclose(pe1);
-        gzclose(pe2);
+        delete(pe1);
+        delete(pe2);
         if (!gzip_output) {
             fclose(outfile1);
             fclose(outfile2);

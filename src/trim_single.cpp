@@ -2,16 +2,15 @@
 #include <ctype.h>
 #include <stdlib.h>
 #include <zlib.h>
+#include <string.h>
 #include <stdio.h>
+#include "FQEntry.h"
+//#include <vector>
 #include <getopt.h>
-#include <queue>
+#include <iostream>
 #include "sickle.h"
-#include "kseq.h"
 #include "print_record.h"
-
-__KS_GETC(gzread, BUFFER_SIZE)
-__KS_GETUNTIL(gzread, BUFFER_SIZE)
-__KSEQ_READ
+#include "trim.h"
 
 int single_qual_threshold = 20;
 int single_length_threshold = 20;
@@ -54,9 +53,9 @@ Options:\n\
 }
 
 int single_main(int argc, char *argv[]) {
-
-    gzFile se = NULL;
-    kseq_t *fqrec;
+    std::cout << "Defining se trimming variables\n";
+    //gzFile se = NULL;
+    GZReader* se = NULL;
     int l;
     FILE *outfile = NULL;
     gzFile outfile_gzip = NULL;
@@ -74,7 +73,10 @@ int single_main(int argc, char *argv[]) {
     int trunc_n = 0;
     int gzip_output = 0;
     int total=0;
+    int threads=4; //TODO: add thread number argument
+    int batch_len=1024*1024; //TODO: add batch length argument
 
+    std::cout << "Setting se trimming params\n";
     while (1) {
         int option_index = 0;
         optc = getopt_long(argc, argv, "df:t:o:q:l:zxng", single_long_options, &option_index);
@@ -168,7 +170,7 @@ int single_main(int argc, char *argv[]) {
         return EXIT_FAILURE;
     }
 
-    se = gzopen(infn, "r");
+    se = new GZReader(infn);
     if (!se) {
         fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn);
         return EXIT_FAILURE;
@@ -188,12 +190,20 @@ int single_main(int argc, char *argv[]) {
         }
     }
 
+    /*std::vector<std::vector<kseq_t*>* > queues;
+    for (int i = 0; i < threads; i++){
+        queues.push_back(new std::vector<kseq_t*>());
+    }*/
+    //fill sequences queues:
+    FQEntry* fqrec = new FQEntry(0, se);
+    //msg(fqrec->seq.c_str());
+    
+    //std::cout << "Starting trimming of file\n";
+    while (true) {
+        //msg("running sliding window");
+        p1cut = sliding_window(*fqrec, qualtype, single_length_threshold, single_qual_threshold, no_fiveprime, trunc_n, debug);
+        //std::cout << "Runned sliding window\n";
 
-    fqrec = kseq_init(se);
-
-    while ((l = kseq_read(fqrec)) >= 0) {
-
-        p1cut = sliding_window(fqrec, qualtype, single_length_threshold, single_qual_threshold, no_fiveprime, trunc_n, debug);
         total++;
 
         if (debug) printf("P1cut: %d,%d\n", p1cut->five_prime_cut, p1cut->three_prime_cut);
@@ -205,25 +215,41 @@ int single_main(int argc, char *argv[]) {
                 /* and then only prints out to the 3' cut, however, we need to adjust the 3' cut */
                 /* by subtracting the 5' cut because the 3' cut was calculated on the original sequence */
 
-                print_record (outfile, fqrec, p1cut);
+                print_record (outfile, *fqrec, p1cut);
             } else {
-                print_record_gzip (outfile_gzip, fqrec, p1cut);
+                print_record_gzip (outfile_gzip, *fqrec, p1cut);
             }
 
             kept++;
         }
 
         else discard++;
-
         free(p1cut);
+        if(se->reached_end()){
+            //msg("reached end");
+            break;
+        }else{
+            //msg("reading entry for new cycle");
+            fqrec = new FQEntry(fqrec->position, se);
+            //msg("read entry for new cycle");
+        }
     }
 
     if (!quiet) fprintf(stdout, "\nSE input file: %s\n\nTotal FastQ records: %d\nFastQ records kept: %d\nFastQ records discarded: %d\n\n", infn, total, kept, discard);
 
-    kseq_destroy(fqrec);
-    gzclose(se);
-    if (!gzip_output) fclose(outfile);
-    else gzclose(outfile_gzip);
+    //kseq_destroy(fqrec);
+    //delete(fqrec);
+    //gzclose(se);
+    msg("closing gzreader");
+    delete(se);
+    
+    if (!gzip_output){
+        msg("closing outfile");
+        fclose(outfile);
+    }else{
+        msg("closing gz outfile");
+        gzclose(outfile_gzip);
+    }
 
     return EXIT_SUCCESS;
 }

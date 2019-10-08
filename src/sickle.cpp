@@ -7,6 +7,7 @@
 #include <getopt.h>
 #include <string.h>
 #include "sickle.h"
+#include "trim.h"
 
 void main_usage (int status) {
 
