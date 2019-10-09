@@ -4,11 +4,14 @@
 #include <zlib.h>
 #include <string.h>
 #include <stdio.h>
-#include "FQEntry.h"
 #include <getopt.h>
 #include <iostream>
 #include <queue>
 #include <sstream>
+#include <thread>
+#include <functional>
+
+#include "FQEntry.h"
 #include "sickle.h"
 #include "print_record.h"
 #include "trim_single.h"
@@ -265,12 +268,20 @@ int Trim_Single::trim_main() {
             break;
         }
 
+        msg("Starting threads");
+        vector<thread> running;
         for(int thread_n = 0; thread_n < threads; thread_n++){
-            processing_thread(queues[thread_n], filtered_reads[thread_n], saved_cutsites[thread_n], thread_n);
+            running.push_back(thread(&Trim_Single::processing_thread,
+                this,
+                queues[thread_n], filtered_reads[thread_n], saved_cutsites[thread_n], thread_n)
+            );
+            //processing_thread(queues[thread_n], filtered_reads[thread_n], saved_cutsites[thread_n], thread_n);
         }
 
+        msg("Joining all");
+        std::for_each(running.begin(),running.end(), std::mem_fn(&std::thread::join));
+
         output_single(queues, filtered_reads, saved_cutsites);
-        
     }
 
     if (!quiet) fprintf(stdout, "\nSE input file: %s\n\nTotal FastQ records: %d\nFastQ records kept: %d\nFastQ records discarded: %d\n\n", infn, total, kept, discard);
@@ -293,7 +304,6 @@ void Trim_Single::processing_thread(std::vector<FQEntry*>* local_queue, bool* fi
         fqrec = local_queue->at(i);
         //msg("running sliding window");
         saved_cutsites[i] = sliding_window(*fqrec);
-        total++;
         //if (debug) printf("P1cut: %d,%d\n", p1cut->five_prime_cut, p1cut->three_prime_cut);
         if(!(saved_cutsites[i]->three_prime_cut >= 0)) filtered[i] = true;
         //output_single(fqrec, p1cut);
@@ -325,6 +335,9 @@ void Trim_Single::output_single(std::vector<std::vector<FQEntry*>* > queues,
             }
         }
     }
+
+    total = kept + discard;
+
     msg("Finished results string");
 
     msg("Outputing");

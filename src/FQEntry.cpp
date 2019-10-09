@@ -53,7 +53,8 @@ FQEntry::FQEntry(){
 void FQEntry::validate(){
     //string actual_seq = string("In ")+string(name)+string("(line ")+to_string((position*4)-4)+string(")");
     if(name.length() <= 1){
-        //error(actual_seq);
+        string actual_seq = string("In ")+string(name)+string("(line ")+to_string((position*4)-4)+string(")");
+        error(actual_seq);
         error("Sequence ID is to short.");
         error(string("ID:") + string(name));
         error(string("Sequence: ") + string(seq));
@@ -63,8 +64,12 @@ void FQEntry::validate(){
     }
 
     if(name.at(0) != '@'){
-        //error(actual_seq);
+        string actual_seq = string("In ")+string(name)+string("(line ")+to_string((position*4)-4)+string(")");
+        error(actual_seq);
         error("Invalid char at the beggining of ID.");
+        error(string("Sequence: ") + string(seq));
+        error(string("Comment: ") + string(comment));
+        error(string("Qualities: ") + string(qual));
         exit(EXIT_FAILURE);
     }
 

@@ -12,6 +12,8 @@
 
 using namespace std;
 
+
+
 class Batch{
 public:
     Batch(const char * buffer);
@@ -25,6 +27,7 @@ public:
     int sequences_len;
     int n_lines();
 private:
+    void splitSVPtr(std::string_view delims = " ");
     string_view content, remaining;
     vector<string_view> lines;
     size_t last_line;

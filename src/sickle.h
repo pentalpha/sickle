@@ -20,7 +20,7 @@
 #endif
 
 #ifndef DEFAULT_THREADS
-#define DEFAULT_THREADS 1
+#define DEFAULT_THREADS 4
 #endif
 
 #ifndef DEFAULT_BATCH_LEN

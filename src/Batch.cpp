@@ -1,4 +1,5 @@
 #include "Batch.h"
+#include <algorithm>
 
 using namespace std;
 
@@ -11,6 +12,7 @@ Batch::Batch(const char * buffer){
     msg("Make lines?");
     if(content.length()>0){
         make_lines();
+        //splitSVPtr("\n");
     }else{
         msg("No, empty content");
     }
@@ -37,6 +39,23 @@ const char * Batch::get_remainder(){
     return string(remaining).c_str();
 }
 
+//this was supposed to be faster than make_lines, but it's not
+void Batch::splitSVPtr(std::string_view delims)
+{
+	//std::vector<std::string_view> output;
+	//output.reserve(str.size() / 2);
+
+	for (auto first = content.data(), second = content.data(), last = first + content.size();
+        second != last && first != last;
+        first = second + 1)
+    {
+		second = std::find_first_of(first, last, std::cbegin(delims), std::cend(delims));
+
+		if (first != second)
+			lines.emplace_back(first, second - first);
+	}
+}
+
 void Batch::make_lines(){
     msg("Making lines");
     int next_newline = get_next_newline(0);
@@ -46,10 +65,18 @@ void Batch::make_lines(){
         string_view view = content.substr(from,next_newline-from);
         //msg(string("New line: ") + string(view));
         if(view.length()>0){
-            lines.push_back(view);
-            if(view.length() % 2){
+            if(lines.size() % 4 == 1){
                 sequences_len += view.length();
+            }else if(lines.size() % 4 == 0){
+                if(view.at(0) != '@'){
+                    error("Invalid ID: ");
+                    error(string(view));
+                    error("Previous line:");
+                    error(string(lines.front()));
+                    exit(EXIT_FAILURE);
+                }
             }
+            lines.push_back(view);
         }
         from = next_newline+1;
         next_newline = get_next_newline(from);
