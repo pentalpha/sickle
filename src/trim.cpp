@@ -104,7 +104,7 @@ cutsites* Abstract_Trimmer::sliding_window(FQEntry &fqrec){
         three_prime_cut = -1;
         five_prime_cut = -1;
 
-        if (debug) printf("%s\n", fqrec.name.c_str());
+        if (debug) printf("%s\n", string(fqrec.name).c_str());
     }
 
     if (debug) printf ("\n\n");
@@ -129,8 +129,8 @@ int Abstract_Trimmer::get_quality_num(char qualchar, FQEntry &fqrec, int pos){
   if (qual_value < quality_constants[qualtype][Q_MIN] || qual_value > quality_constants[qualtype][Q_MAX]) {
 	fprintf (stderr, "ERROR: Quality value (%d) does not fall within correct range for %s encoding.\n", qual_value, typenames[qualtype]);
 	fprintf (stderr, "Range for %s encoding: %d-%d\n", typenames[qualtype], quality_constants[qualtype][Q_MIN], quality_constants[qualtype][Q_MAX]);
-	fprintf (stderr, "FastQ record: %s\n", fqrec.name.c_str());
-	fprintf (stderr, "Quality string: %s\n", fqrec.qual.c_str());
+	fprintf (stderr, "FastQ record: %s\n", string(fqrec.name).c_str());
+	fprintf (stderr, "Quality string: %s\n", string(fqrec.qual).c_str());
 	fprintf (stderr, "Quality char: '%c'\n", qualchar);
 	fprintf (stderr, "Quality position: %d\n", pos+1);
 	exit(1);

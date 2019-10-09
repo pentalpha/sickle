@@ -1,7 +1,7 @@
 PROGRAM_NAME = sickle
 VERSION = 1.33
 CXX = g++
-CXXFLAGS = -std=c++11 -Wall -DVERSION=$(VERSION)
+CXXFLAGS = -std=c++17 -Wall -DVERSION=$(VERSION)
 DEBUG = -g
 OPT = -O3
 ARCHIVE = $(PROGRAM_NAME)_$(VERSION)
@@ -34,6 +34,9 @@ GZReader.o: $(SDIR)/GZReader.cpp $(SDIR)/GZReader.h
 FQEntry.o: $(SDIR)/FQEntry.cpp $(SDIR)/FQEntry.h
 	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
+Batch.o: $(SDIR)/Batch.cpp $(SDIR)/Batch.h
+	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
+
 clean:
 	rm -rf *.o $(SDIR)/*.gch ./sickle
 
@@ -43,7 +46,7 @@ distclean: clean
 dist:
 	tar -zcf $(ARCHIVE).tar.gz src Makefile README.md sickle.xml LICENSE
 
-build: GZReader.o FQEntry.o trim.o trim_single.o trim_paired.o sickle.o print_record.o
+build: Batch.o GZReader.o FQEntry.o trim.o trim_single.o trim_paired.o sickle.o print_record.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OPT) $? -o sickle $(LIBS)
 
 debug:

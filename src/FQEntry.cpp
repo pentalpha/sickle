@@ -5,16 +5,14 @@
 
 using namespace std;
 
-FQEntry::FQEntry(int previous, GZReader *reader){
+FQEntry::FQEntry(int previous, Batch *reader){
     //msg("new fqentry");
     position = previous + 1;
-    
-    std::string* strs = reader->read4();
 
-    this->name = strs[0];
-    this->seq = strs[1];
-    this->comment = strs[2];
-    this->qual = strs[3];
+    this->name = reader->next_line();
+    this->seq = reader->next_line();
+    this->comment = reader->next_line();
+    this->qual = reader->next_line();
 
     validate();
 }
@@ -53,34 +51,40 @@ FQEntry::FQEntry(){
 }
 
 void FQEntry::validate(){
-    string actual_seq = string("In ")+name+string("(line ")+to_string((position*4)-1)+string(")");
+    //string actual_seq = string("In ")+string(name)+string("(line ")+to_string((position*4)-4)+string(")");
     if(name.length() <= 1){
-        error(actual_seq);
+        //error(actual_seq);
         error("Sequence ID is to short.");
-        error(string("ID:") + name);
-        error(string("Sequence: ") + seq);
-        error(string("Comment: ") + comment);
-        error(string("Qualities: ") + qual);
+        error(string("ID:") + string(name));
+        error(string("Sequence: ") + string(seq));
+        error(string("Comment: ") + string(comment));
+        error(string("Qualities: ") + string(qual));
+        exit(EXIT_FAILURE);
+    }
+
+    if(name.at(0) != '@'){
+        //error(actual_seq);
+        error("Invalid char at the beggining of ID.");
         exit(EXIT_FAILURE);
     }
 
     if(seq.length() < 1){
-        error(actual_seq);
+        //error(actual_seq);
         error("Sequence line is empty");
         exit(EXIT_FAILURE);
     }
 
     if(qual.length() < 1){
-        error(actual_seq);
+        //error(actual_seq);
         error("Quality line is empty.");
         exit(EXIT_FAILURE);
     }
 
     if(qual.length() != seq.length()){
-        error(actual_seq);
+        //error(actual_seq);
         error("Sequence and quality lines have different lengths:");
-        error(seq);
-        error(qual);
+        error(string(seq));
+        error(string(qual));
         exit(EXIT_FAILURE);
     }
 

@@ -262,79 +262,75 @@ int Trim_Paired::trim_main() {
         queues2.push_back(new std::queue<FQEntry*>());
         queue_lens2.push_back(0);
     }
-
+    Batch* batch = NULL;
+    Batch* batch2 = NULL;
     while(true){
         msg("Reading new batch");
-        long chars_read_for_queue = 0;
-        long chars_read_for_queue2 = 0;
-        int max_queue_len = batch_len / threads;
+        if(batch == NULL){
+            batch = input->get_batch();
+        }else{
+            batch = input->get_batch(batch->get_remainder());
+        }
+
+        if(batch == NULL){
+            msg("No batch returned, exiting.");
+            break;
+        }
+
+        if(!input_inter){
+            if(batch2 == NULL){
+                batch2 = input2->get_batch();
+            }else{
+                batch2 = input2->get_batch(batch2->get_remainder());
+            }
+
+            if(batch2 == NULL){
+                msg("No batch2 returned, exiting.");
+                break;
+            }else{
+                if(batch2->n_lines() != batch->n_lines()){
+                    error("Batch2 and Batch1 have different lengths, exiting");
+                    break;
+                }
+            }
+        }
+        int chars_read_from_batch = 0;
+        int chars_read_from_batch2 = 0;
+        int max_queue_len = batch->sequences_len / threads;
+
+        FQEntry* fqrec = NULL;
+        FQEntry* fqrec2 = NULL;
+        msg("Reading reads from batch");
         while(true){
             if(!input_inter){
-                if(chars_read_for_queue > batch_len){
+                if(chars_read_from_batch > batch_len){
                     break;
                 }
             }else{
-                if(chars_read_for_queue > batch_len || chars_read_for_queue2 > batch_len){
+                if(chars_read_from_batch > batch_len || chars_read_from_batch2 > batch_len){
                     break;
                 }
             }
 
             //msg("Reading read1");
             //if(input == NULL) msg("input1 is null");
-            FQEntry* fqrec;
-            
-            if(!input->reached_end()){
-                //msg("Reading from input1");
-                try{
-                    fqrec = new FQEntry(0, input);
-                }catch(LoadException &ex){
-                    error(ex.what());
-                    break;
-                }catch(EmptyStreamException &ex){
-                    //error(ex.what());
-                    break;
-                }
+            if(fqrec){
+                fqrec = new FQEntry(fqrec->position, batch);
             }else{
-                //msg("End of input1");
-                if(!input_inter){
-                    if(!input2->reached_end()){
-                        fprintf(stderr, "Warning: PE file 1 is shorter than PE file 2. Disregarding rest of PE file 2.\n");
-                    }
-                }
-                break;
+                fqrec = new FQEntry(0, batch);
             }
 
-            //msg("Reading read2");
-            FQEntry* fqrec2;
-            if (input_inter) {
-                if(!input->reached_end()){
-                    try{
-                        fqrec2 = new FQEntry(0, input);
-                    }catch(LoadException &ex){
-                        error(ex.what());
-                        break;
-                    }catch(EmptyStreamException &ex){
-                        //error(ex.what());
-                        break;
-                    }
+            if(fqrec2){
+                if(input_inter){
+                    fqrec2 = new FQEntry(fqrec->position, batch);
                 }else{
-                    fprintf(stderr, "Warning: Interleaved PE file has uneven number of lines. Disregarding the last line.\n");
-                    break;
+                    fqrec2 = new FQEntry(fqrec2->position, batch2);
                 }
             }else{
-                if(!input2->reached_end()){
-                    try{
-                        fqrec2 = new FQEntry(0, input2);
-                    }catch(LoadException &ex){
-                        error(ex.what());
-                        break;
-                    }catch(EmptyStreamException &ex){
-                        //error(ex.what());
-                        break;
-                    }
+                if(input_inter){
+                    fqrec2 = new FQEntry(0, batch);
                 }else{
-                    fprintf(stderr, "Warning: PE file 2 is shorter than PE file 1. Disregarding rest of PE file 1.\n");
-                    break;
+                    fqrec2 = new FQEntry(0, batch2);
                 }
             }
 
@@ -342,8 +338,8 @@ int Trim_Paired::trim_main() {
 
             int read_len = fqrec->seq.length();
             int read_len2 = fqrec2->seq.length();
-            chars_read_for_queue += read_len;
-            chars_read_for_queue2 += read_len2;
+            chars_read_from_batch += read_len;
+            chars_read_from_batch2 += read_len2;
 
             int smallest_queue = 0;
             bool fitted_in_a_queue = false;
@@ -377,7 +373,7 @@ int Trim_Paired::trim_main() {
         }
         msg("Finished reading batch");
 
-        if(chars_read_for_queue == 0){
+        if(chars_read_from_batch == 0){
             msg("Empty batch, finishing program.");
             break;
         }else{
@@ -434,11 +430,6 @@ void Trim_Paired::processing_thread(std::queue<FQEntry*>* local_queue, std::queu
 
         //msg("Outputing");
         output_paired(fqrec1, fqrec2, p1cut, p2cut);
-
-        free(p1cut);
-        free(p2cut);
-        free(fqrec1);
-        free(fqrec2);
     }
 }
 
@@ -568,7 +559,7 @@ int Trim_Paired::init_streams(){
             }
         }
 
-        input_inter = new GZReader(infnc);
+        input_inter = new GZReader(infnc, batch_len);
         if (!input_inter) {
             fprintf(stderr, "****Error: Could not open combined input file '%s'.\n\n", infnc);
             return EXIT_FAILURE;
@@ -595,13 +586,13 @@ int Trim_Paired::init_streams(){
             return EXIT_FAILURE;
         }
 
-        input = new GZReader(infn);
+        input = new GZReader(infn, batch_len);
         if (!input) {
             fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn);
             return EXIT_FAILURE;
         }
 
-        input2 = new GZReader(infn2);
+        input2 = new GZReader(infn2, batch_len);
         if (!input2) {
             fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn2);
             return EXIT_FAILURE;
