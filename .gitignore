@@ -1,4 +1,5 @@
 *.o
 sickle
 test/output/*
+test/big/*
 .vscode/settings.json

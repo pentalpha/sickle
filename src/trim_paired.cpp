@@ -6,9 +6,11 @@
 #include <getopt.h>
 #include <unistd.h>
 #include <string.h>
+#include <thread>
+#include <algorithm>
+#include <functional>
 #include "FQEntry.h"
 #include "sickle.h"
-#include "print_record.h"
 #include "trim_paired.h"
 
 static struct option paired_long_options[] = {
@@ -249,92 +251,113 @@ int Trim_Paired::trim_main() {
     if(res != 0){
         return res;
     }
+    std::vector<std::vector<FQEntry*>* > queues;
+    std::vector<std::vector<FQEntry*>* > queues2;
 
-    std::vector<std::queue<FQEntry*>* > queues;
-    std::vector<std::queue<FQEntry*>* > queues2;
     std::vector<long> queue_lens;
     std::vector<long> queue_lens2;
+
+    std::vector<long> last_item;
+
+    bool** filtered_reads1 = new bool*[threads];
+    bool** filtered_reads2 = new bool*[threads];
+
+    cutsites*** saved_cutsites1 = new cutsites**[threads];
+    cutsites*** saved_cutsites2 = new cutsites**[threads];
+
     for (int i = 0; i < threads; i++){
-        queues.push_back(new std::queue<FQEntry*>());
+        queues.push_back(new std::vector<FQEntry*>());
         queue_lens.push_back(0);
+        last_item.push_back(-1);
     }
     for (int i = 0; i < threads; i++){
-        queues2.push_back(new std::queue<FQEntry*>());
+        queues2.push_back(new std::vector<FQEntry*>());
         queue_lens2.push_back(0);
     }
 
+    Batch* batch = NULL;
+    Batch* batch2 = NULL;
     while(true){
-        msg("Reading new batch");
-        long chars_read_for_queue = 0;
-        long chars_read_for_queue2 = 0;
-        int max_queue_len = batch_len / threads;
-        while(true){
+        for (int i = 0; i < threads; i++){
+            last_item[i] =  -1;
+            queue_lens[i] =  0;
+            queue_lens2[i] = 0;
+        }
+
+        //msg("Reading new batch");
+        if(batch == NULL){
+            batch = input->get_batch();
+        }else{
+            batch = input->get_batch(batch->get_remainder());
+        }
+        //msg("Read new batch");
+        if(batch == NULL){
+            msg("No batch returned, exiting.");
+            break;
+        }
+
+        if(!input_inter){
+            //msg("Reading batch2");
+            if(batch2 == NULL){
+                batch2 = input2->get_batch();
+            }else{
+                batch2 = input2->get_batch(batch2->get_remainder());
+            }
+            //msg("Read batch2");
+
+            if(batch2 == NULL){
+                //msg("No batch2 returned, exiting.");
+                break;
+            }else{
+                if(batch2->n_lines() != batch->n_lines()){
+                    error("Batch2 and Batch1 have different lengths, exiting");
+                    break;
+                }
+            }
+        }else{
+            //msg("No need for batch2");
+        }
+        int chars_read_from_batch = 0;
+        int max_queue_len = batch->sequences_len / threads;
+
+        FQEntry* fqrec = NULL;
+        FQEntry* fqrec2 = NULL;
+        //msg("Reading reads from batch");
+        while(batch->has_lines()){
             if(!input_inter){
-                if(chars_read_for_queue > batch_len){
+                if(chars_read_from_batch > batch_len){
                     break;
                 }
             }else{
-                if(chars_read_for_queue > batch_len || chars_read_for_queue2 > batch_len){
+                if(chars_read_from_batch > batch_len){
                     break;
                 }
             }
 
             //msg("Reading read1");
             //if(input == NULL) msg("input1 is null");
-            FQEntry* fqrec;
-            
-            if(!input->reached_end()){
-                //msg("Reading from input1");
-                try{
-                    fqrec = new FQEntry(0, input);
-                }catch(LoadException &ex){
-                    error(ex.what());
-                    break;
-                }catch(EmptyStreamException &ex){
-                    //error(ex.what());
-                    break;
-                }
+            if(fqrec){
+                fqrec = new FQEntry(fqrec->position, batch);
             }else{
-                //msg("End of input1");
-                if(!input_inter){
-                    if(!input2->reached_end()){
-                        fprintf(stderr, "Warning: PE file 1 is shorter than PE file 2. Disregarding rest of PE file 2.\n");
-                    }
-                }
-                break;
+                fqrec = new FQEntry(0, batch);
             }
 
             //msg("Reading read2");
-            FQEntry* fqrec2;
-            if (input_inter) {
-                if(!input->reached_end()){
-                    try{
-                        fqrec2 = new FQEntry(0, input);
-                    }catch(LoadException &ex){
-                        error(ex.what());
-                        break;
-                    }catch(EmptyStreamException &ex){
-                        //error(ex.what());
-                        break;
-                    }
+            if(input_inter && !batch->has_lines()){
+                error("Reading interleaved pair: read1 loaded, but no read2 to load. Maybe it's not an interleaved file?");
+                exit(EXIT_FAILURE);
+            }
+            if(fqrec2){
+                if(input_inter){
+                    fqrec2 = new FQEntry(fqrec->position, batch);
                 }else{
-                    fprintf(stderr, "Warning: Interleaved PE file has uneven number of lines. Disregarding the last line.\n");
-                    break;
+                    fqrec2 = new FQEntry(fqrec2->position, batch2);
                 }
             }else{
-                if(!input2->reached_end()){
-                    try{
-                        fqrec2 = new FQEntry(0, input2);
-                    }catch(LoadException &ex){
-                        error(ex.what());
-                        break;
-                    }catch(EmptyStreamException &ex){
-                        //error(ex.what());
-                        break;
-                    }
+                if(input_inter){
+                    fqrec2 = new FQEntry(0, batch);
                 }else{
-                    fprintf(stderr, "Warning: PE file 2 is shorter than PE file 1. Disregarding rest of PE file 1.\n");
-                    break;
+                    fqrec2 = new FQEntry(0, batch2);
                 }
             }
 
@@ -342,50 +365,84 @@ int Trim_Paired::trim_main() {
 
             int read_len = fqrec->seq.length();
             int read_len2 = fqrec2->seq.length();
-            chars_read_for_queue += read_len;
-            chars_read_for_queue2 += read_len2;
+            chars_read_from_batch += read_len;
 
             int smallest_queue = 0;
             bool fitted_in_a_queue = false;
 
             //msg("Looking for queue to fit read into it");
             for(unsigned i = 0; i < queues.size(); i++){
-                std::queue<FQEntry*>* queue = queues[i];
-                std::queue<FQEntry*>* queue2 = queues2[i];
-                if(queue_lens[i] + read_len < max_queue_len){
-                    queue->push(fqrec);
+                std::vector<FQEntry*>* queue = queues[i];
+                std::vector<FQEntry*>* queue2 = queues2[i];
+                if(queue_lens[i] + read_len < max_queue_len)
+                {
+                    queue->emplace(queue->begin() + last_item[i]+1, fqrec);
                     queue_lens[i] += read_len;
-                    queue2->push(fqrec2);
+                    queue2->emplace(queue2->begin() + last_item[i]+1, fqrec2);
                     queue_lens2[i] += read_len2;
-
                     fitted_in_a_queue = true;
+                    last_item[i] += 1;
                 }
                 if(queue_lens[i] < queue_lens[smallest_queue]){
                     smallest_queue = i;
                 }
                 if(fitted_in_a_queue) break;
             }
-
+            //msg("Found");
             if(!fitted_in_a_queue){
-                queues[smallest_queue]->push(fqrec);
+                //msg("Fitting into smallest queue");
+                queues[smallest_queue]->emplace(queues[smallest_queue]->begin() + last_item[smallest_queue]+1, fqrec);
                 queue_lens[smallest_queue] += read_len;
 
-                queues2[smallest_queue]->push(fqrec2);
+                queues2[smallest_queue]->emplace(queues2[smallest_queue]->begin() + last_item[smallest_queue]+1, fqrec2);
                 queue_lens2[smallest_queue] += read_len2;
+
+                last_item[smallest_queue] += 1;
             }
             //msg("Stored read");
         }
-        msg("Finished reading batch");
+        //msg("Finished reading batch");
 
-        if(chars_read_for_queue == 0){
+        if(chars_read_from_batch == 0){
             msg("Empty batch, finishing program.");
             break;
         }else{
-            msg("Processing threads:");
-            msg(to_string(threads));
-            for(int thread_n = 0; thread_n < threads; thread_n++){
-                processing_thread(queues[thread_n], queues2[thread_n], thread_n);
+            for (int i = 0; i < threads; i++){
+                filtered_reads1[i] = new bool[last_item[i]+1];
+                filtered_reads2[i] = new bool[last_item[i]+1];
+                bool* array = filtered_reads1[i];
+                memset(array, false, sizeof(array[0])*last_item[i]+1);
+                bool* array2 = filtered_reads2[i];
+                memset(array2, false, sizeof(array2[0])*last_item[i]+1);
+                /*for(int j = 0; j < last_item[i]+1; j++){
+                    if(array[j] != false){
+                        error("Array is not all false");
+                        exit(EXIT_FAILURE);
+                    }
+                }*/
+                saved_cutsites1[i] = new cutsites*[last_item[i]+1];
+                saved_cutsites2[i] = new cutsites*[last_item[i]+1];
             }
+
+            //msg("Processing threads:");
+            msg(to_string(threads));
+            vector<thread> running;
+
+            for(int thread_n = 0; thread_n < threads; thread_n++){
+                running.push_back(thread(&Trim_Paired::processing_thread,
+                    this,
+                    queues[thread_n], queues2[thread_n],
+                    filtered_reads1[thread_n], filtered_reads2[thread_n],
+                    saved_cutsites1[thread_n], saved_cutsites2[thread_n],
+                    last_item[thread_n], thread_n
+                ));
+            }
+
+            //msg("Joining all");
+            std::for_each(running.begin(),running.end(), std::mem_fn(&std::thread::join));
+
+            output_paired(queues, queues2, filtered_reads1, filtered_reads2,
+                saved_cutsites1, saved_cutsites2, last_item);
         }
     }
 
@@ -408,125 +465,130 @@ int Trim_Paired::trim_main() {
     return EXIT_SUCCESS;
 }
 
-void Trim_Paired::processing_thread(std::queue<FQEntry*>* local_queue, std::queue<FQEntry*>* local_queue2, int thread_n){
+void Trim_Paired::processing_thread(
+        std::vector<FQEntry*>* local_queue, std::vector<FQEntry*>* local_queue2,
+        bool* filtered1, bool* filtered2,
+        cutsites** cutsites1, cutsites** cutsites2,
+        long last_index, int thread_n)
+{
     assert(local_queue != NULL && local_queue2 != NULL);
 
-    msg(string("Processing thread ") + to_string(thread_n) + string(", read pairs: ") + to_string(local_queue->size()));
+    msg(string("Processing thread ") + to_string(thread_n) + string(", read pairs: ") + to_string(last_index+1));
     FQEntry* fqrec1;
     FQEntry* fqrec2;
 
     assert(local_queue2->size() == local_queue->size());
-
-    while (!local_queue->empty()) {
-        //msg("Retrieving reads from queues");
-        fqrec1 = local_queue->front();
-        local_queue->pop();
-        fqrec2 = local_queue2->front();
-        local_queue2->pop();
-
-        //msg("Sliding reads");
-        cutsites *p1cut = sliding_window(*fqrec1);
-        cutsites *p2cut = sliding_window(*fqrec2);
-        total += 2;
-
-        if (debug) printf("p1cut: %d,%d\n", p1cut->five_prime_cut, p1cut->three_prime_cut);
-        if (debug) printf("p2cut: %d,%d\n", p2cut->five_prime_cut, p2cut->three_prime_cut);
-
-        //msg("Outputing");
-        output_paired(fqrec1, fqrec2, p1cut, p2cut);
-
-        free(p1cut);
-        free(p2cut);
-        free(fqrec1);
-        free(fqrec2);
+    for(int i = 0; i <= last_index; i++){
+        fqrec1 = local_queue->at(i);
+        fqrec2 = local_queue2->at(i);
+        cutsites1[i] = sliding_window(*fqrec1);
+        if(!(cutsites1[i]->three_prime_cut >= 0)) filtered1[i] = true;
+        cutsites2[i] = sliding_window(*fqrec2);
+        if(!(cutsites2[i]->three_prime_cut >= 0)) filtered2[i] = true;
     }
 }
 
-void Trim_Paired::output_paired(FQEntry* fqrec1, FQEntry* fqrec2, cutsites *p1cut, cutsites *p2cut){
-    /* The sequence and quality print statements below print out the sequence string starting from the 5' cut */
-        /* and then only print out to the 3' cut, however, we need to adjust the 3' cut */
-        /* by subtracting the 5' cut because the 3' cut was calculated on the original sequence */
+std::string Trim_Paired::get_read_string(FQEntry* read, cutsites* cs){
+    std::stringstream to_print;
+    to_print << read->name << "\n";
+    to_print << read->seq.substr(cs->five_prime_cut, cs->three_prime_cut - cs->five_prime_cut) << "\n";
+    to_print << read->comment << "\n";
+    to_print << read->qual.substr(cs->five_prime_cut, cs->three_prime_cut - cs->five_prime_cut) << "\n";
+    return to_print.str();
+}
 
-        /* if both sequences passed quality and length filters, then output both records */
-        if (p1cut->three_prime_cut >= 0 && p2cut->three_prime_cut >= 0) {
-            if (!gzip_output) {
-                if (input_inter) {
-                    print_record (outfile_combo, *fqrec1, p1cut);
-                    print_record (outfile_combo, *fqrec2, p2cut);
-                } else {
-                    print_record (outfile, *fqrec1, p1cut);
-                    print_record (outfile2, *fqrec2, p2cut);
-                }
-            } else {
-                if (input_inter) {
-                    print_record_gzip (combo_gzip, *fqrec1, p1cut);
-                    print_record_gzip (combo_gzip, *fqrec2, p2cut);
-                } else {
-                    print_record_gzip (outfile_gzip, *fqrec1, p1cut);
-                    print_record_gzip (outfile2_gzip, *fqrec2, p2cut);
+void Trim_Paired::output_paired(std::vector<std::vector<FQEntry*>* > queues, std::vector<std::vector<FQEntry*>* > queues2,
+        bool** filtered_reads, bool** filtered_reads2,
+        cutsites*** saved_cutsites, cutsites*** saved_cutsites2,
+        vector<long> last_index)
+{
+    msg("Making results string");
+    std::stringstream fq1, fq2, singles;
+    for (size_t i = 0; i < queues.size(); i++){
+        //msg("Results from thread ");
+        //msg(to_string(i));
+        if(queues[i]->size() > last_index[i]){
+            for (size_t j = 0; j <= last_index[i]; j++)
+            {   
+                //msg("Reading data");
+                bool r1 = !filtered_reads[i][j];
+                bool r2 = !filtered_reads2[i][j];
+                FQEntry* read1 = queues[i]->at(j);
+                cutsites* cs1 = saved_cutsites[i][j];
+                FQEntry* read2 = queues2[i]->at(j);
+                cutsites* cs2 = saved_cutsites2[i][j];
+                //msg("Read entry data");
+                if(r1 && r2){
+                    //msg("Writing both");
+                    fq1 << get_read_string(read1, cs1);
+                    if(input_inter){
+                        fq1 << get_read_string(read2, cs2);
+                    }else{
+                        fq2 << get_read_string(read2, cs2);
+                    }
+                    kept_p += 2;
+                }else if(r1 || r2){
+                    if(r1){
+                        //msg("Writing r1");
+                        singles << get_read_string(read1, cs1);
+                        kept_s1++;
+                        discard_s2++;
+                    }else{
+                        //msg("Writing r2");
+                        singles << get_read_string(read2, cs2);
+                        kept_s2++;
+                        discard_s1++;
+                    }
+                }else{
+                    //msg("Writing none");
+                    discard_p += 2;
                 }
             }
-
-            kept_p += 2;
+        }else{
+            //msg("Empty thread, ignoring");
         }
+        //msg("Read results from thread");
+    }
+    msg("Finished results string");
 
-        /* if only one sequence passed filter, then put its record in singles and discard the other */
-        /* or put an "N" record in if that option was chosen. */
-        else if (p1cut->three_prime_cut >= 0 && p2cut->three_prime_cut < 0) {
-            if (!gzip_output) {
-                if (combo_all) {
-                    print_record (outfile_combo, *fqrec1, p1cut);
-                    print_record_N (outfile_combo, *fqrec2, qualtype);
-                } else {
-                    print_record (outfile_single, *fqrec1, p1cut);
-                }
-            } else {
-                if (combo_all) {
-                    print_record_gzip (combo_gzip, *fqrec1, p1cut);
-                    print_record_N_gzip (combo_gzip, *fqrec2, qualtype);
-                } else {
-                    print_record_gzip (single_gzip, *fqrec1, p1cut);
-                }
+    total = kept_p + kept_s1 + kept_s2 + discard_p + discard_s1 + discard_s2;
+    
+    msg("Outputing");
+    if (!gzip_output) {
+        msg("Writing plain text");
+        if(input_inter){
+            msg("Interleaved output");
+            fprintf(outfile_combo, "%s", fq1.str());
+            if(combo_all){
+                fprintf(outfile_combo, "%s", singles.str());
             }
-
-            kept_s1++;
-            discard_s2++;
+        }else{
+            msg("Separate outputs");
+            fprintf(outfile, "%s", fq1.str());
+            fprintf(outfile2, "%s", fq2.str());
+            if(!combo_all){
+                fprintf(outfile_single, "%s", fq2.str());
+            }else{
+                fprintf(outfile_combo, "%s", fq2.str());
+            }
         }
-
-        else if (p1cut->three_prime_cut < 0 && p2cut->three_prime_cut >= 0) {
-            if (!gzip_output) {
-                if (combo_all) {
-                    print_record_N (outfile_combo, *fqrec1, qualtype);
-                    print_record (outfile_combo, *fqrec2, p2cut);
-                } else {
-                    print_record (outfile_single, *fqrec2, p2cut);
-                }
-            } else {
-                if (combo_all) {
-                    print_record_N_gzip (combo_gzip, *fqrec1, qualtype);
-                    print_record_gzip (combo_gzip, *fqrec2, p2cut);
-                } else {
-                    print_record_gzip (single_gzip, *fqrec2, p2cut);
-                }
+    } else {
+        if(input_inter){
+            gzprintf(combo_gzip, "%s", fq1.str());
+            if(combo_all){
+                gzprintf(combo_gzip, "%s", singles.str());
             }
-
-            kept_s2++;
-            discard_s1++;
-        } else {
-            /* If both records are to be discarded, but the -M option */
-            /* is being used, then output two "N" records */
-            if (combo_all) {
-                if (!gzip_output) {
-                    print_record_N (outfile_combo, *fqrec1, qualtype);
-                    print_record_N (outfile_combo, *fqrec2, qualtype);
-                } else {
-                    print_record_N_gzip (combo_gzip, *fqrec1, qualtype);
-                    print_record_N_gzip (combo_gzip, *fqrec2, qualtype);
-                }
+        }else{
+            gzprintf(outfile_gzip, "%s", fq1.str());
+            gzprintf(outfile2_gzip, "%s", fq2.str());
+            if(!combo_all){
+                gzprintf(single_gzip, "%s", fq2.str());
+            }else{
+                gzprintf(combo_gzip, "%s", fq2.str());
             }
-
-            discard_p += 2;
         }
+    }
+    msg("Finished outputing results");
 }
 
 int Trim_Paired::init_streams(){
@@ -568,7 +630,7 @@ int Trim_Paired::init_streams(){
             }
         }
 
-        input_inter = new GZReader(infnc);
+        input_inter = new GZReader(infnc, batch_len);
         if (!input_inter) {
             fprintf(stderr, "****Error: Could not open combined input file '%s'.\n\n", infnc);
             return EXIT_FAILURE;
@@ -595,13 +657,13 @@ int Trim_Paired::init_streams(){
             return EXIT_FAILURE;
         }
 
-        input = new GZReader(infn);
+        input = new GZReader(infn, batch_len);
         if (!input) {
             fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn);
             return EXIT_FAILURE;
         }
 
-        input2 = new GZReader(infn2);
+        input2 = new GZReader(infn2, batch_len);
         if (!input2) {
             fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn2);
             return EXIT_FAILURE;

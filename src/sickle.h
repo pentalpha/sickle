@@ -5,7 +5,7 @@
 #include <zlib.h>
 #include <iostream>
 
-#define BUFFER_SIZE 512
+#define BUFFER_SIZE 4096
 
 #ifndef PROGRAM_NAME
 #define PROGRAM_NAME "sickle"
@@ -20,11 +20,11 @@
 #endif
 
 #ifndef DEFAULT_THREADS
-#define DEFAULT_THREADS 1
+#define DEFAULT_THREADS 4
 #endif
 
 #ifndef DEFAULT_BATCH_LEN
-#define DEFAULT_BATCH_LEN 1024*1024
+#define DEFAULT_BATCH_LEN 1024*1024*512
 #endif
 
 /* Options drawn from GNU's coreutils/src/system.h */

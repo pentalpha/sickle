@@ -2,6 +2,7 @@
 #define _TRIM_
 
 #include "FQEntry.h"
+#include "GZReader.h"
 
 class Abstract_Trimmer{
 public:
