@@ -10,9 +10,11 @@ public:
     int parse_args(int argc, char *argv[]);
 
     int trim_main();
-    void processing_thread(std::vector<FQEntry*>* local_queue, bool* filtered, cutsites** saved_cutsites, int thread_n);
+    void processing_thread(std::vector<FQEntry*>* local_queue, bool* filtered, 
+        cutsites** saved_cutsites, long last_index, int thread_n);
     void usage(int status, char const *msg);
-    void output_single(std::vector<std::vector<FQEntry*>* > queues, bool** filtered_reads, cutsites*** saved_cutsites);
+    void output_single(std::vector<std::vector<FQEntry*>* > queues, bool** filtered_reads, 
+        cutsites*** saved_cutsites, vector<long> last_index);
     int init_streams();
     void close_streams();
 };

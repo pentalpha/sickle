@@ -13,7 +13,6 @@
 
 #include "FQEntry.h"
 #include "sickle.h"
-#include "print_record.h"
 #include "trim_single.h"
 #include "GZReader.h"
 
@@ -190,15 +189,21 @@ int Trim_Single::trim_main() {
     msg("Creating queues");
     std::vector<std::vector<FQEntry*>* > queues;
     std::vector<long> queue_lens;
+    std::vector<long> last_item;
     for (int i = 0; i < threads; i++){
         queues.push_back(new std::vector<FQEntry*>());
         queue_lens.push_back(0);
+        last_item.push_back(-1);
     }
     bool** filtered_reads = new bool*[threads];
     cutsites*** saved_cutsites = new cutsites**[threads];
     msg("Finished creating queues");
     Batch* batch = NULL;
     while(true){
+        for (int i = 0; i < threads; i++){
+            last_item[i] = -1;
+            queue_lens[i] = 0;
+        }
         msg("Reading new batch");
         if(batch == NULL){
             batch = input->get_batch();
@@ -232,9 +237,11 @@ int Trim_Single::trim_main() {
             for(unsigned i = 0; i < queues.size(); i++){
                 std::vector<FQEntry*>* queue = queues[i];
                 if(queue_lens[i] + read_len < max_queue_len){
-                    queue->push_back(fqrec);
+                    queue->emplace(queue->begin()+last_item[i]+1, fqrec);
+
                     queue_lens[i] += read_len;
                     fitted_in_a_queue = true;
+                    last_item[i] += 1;
                 }
                 if(queue_lens[i] < queue_lens[smallest_queue]){
                     smallest_queue = i;
@@ -243,8 +250,11 @@ int Trim_Single::trim_main() {
             }
 
             if(!fitted_in_a_queue){
-                queues[smallest_queue]->push_back(fqrec);
+                queues[smallest_queue]->emplace(queues[smallest_queue]->begin()+last_item[smallest_queue]+1, fqrec);
                 queue_lens[smallest_queue] += read_len;
+
+                fitted_in_a_queue = true;
+                last_item[smallest_queue] += 1;
             }
         }
 
@@ -273,7 +283,7 @@ int Trim_Single::trim_main() {
         for(int thread_n = 0; thread_n < threads; thread_n++){
             running.push_back(thread(&Trim_Single::processing_thread,
                 this,
-                queues[thread_n], filtered_reads[thread_n], saved_cutsites[thread_n], thread_n)
+                queues[thread_n], filtered_reads[thread_n], saved_cutsites[thread_n], last_item[thread_n], thread_n)
             );
             //processing_thread(queues[thread_n], filtered_reads[thread_n], saved_cutsites[thread_n], thread_n);
         }
@@ -281,7 +291,7 @@ int Trim_Single::trim_main() {
         msg("Joining all");
         std::for_each(running.begin(),running.end(), std::mem_fn(&std::thread::join));
 
-        output_single(queues, filtered_reads, saved_cutsites);
+        output_single(queues, filtered_reads, saved_cutsites, last_item);
     }
 
     if (!quiet) fprintf(stdout, "\nSE input file: %s\n\nTotal FastQ records: %d\nFastQ records kept: %d\nFastQ records discarded: %d\n\n", infn, total, kept, discard);
@@ -294,13 +304,13 @@ int Trim_Single::trim_main() {
     return EXIT_SUCCESS;
 }
 
-void Trim_Single::processing_thread(std::vector<FQEntry*>* local_queue, bool* filtered, 
-    cutsites** saved_cutsites, int thread_n)
+void Trim_Single::processing_thread(std::vector<FQEntry*>* local_queue, bool* filtered,
+    cutsites** saved_cutsites, long last_index, int thread_n)
 {
-    msg(string("Processing thread ") + to_string(thread_n) + string(", reads: ") + to_string(local_queue->size()));
+    msg(string("Processing thread ") + to_string(thread_n) + string(", reads: ") + to_string(last_index+1));
     FQEntry* fqrec;
     //cutsites *p1cut;
-    for(int i = 0; i < local_queue->size(); i++){
+    for(int i = 0; i <= last_index; i++){
         fqrec = local_queue->at(i);
         //msg("running sliding window");
         saved_cutsites[i] = sliding_window(*fqrec);
@@ -312,12 +322,13 @@ void Trim_Single::processing_thread(std::vector<FQEntry*>* local_queue, bool* fi
 }
 
 void Trim_Single::output_single(std::vector<std::vector<FQEntry*>* > queues,
-    bool** filtered_reads, cutsites*** saved_cutsites)
+    bool** filtered_reads, cutsites*** saved_cutsites,
+    vector<long> last_index)
 {
     msg("Making results string");
     std::stringstream to_print;
     for (size_t i = 0; i < threads; i++){
-        for (size_t j = 0; j < queues[i]->size(); j++)
+        for (size_t j = 0; j <= last_index[i]; j++)
         {
             if(filtered_reads[i][j]){
                 discard++;

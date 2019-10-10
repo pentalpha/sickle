@@ -25,9 +25,6 @@ trim_paired.o: $(SDIR)/trim_paired.cpp $(SDIR)/trim_paired.h
 sickle.o: $(SDIR)/sickle.cpp $(SDIR)/sickle.h
 	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
-print_record.o: $(SDIR)/print_record.cpp $(SDIR)/print_record.h
-	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
-
 GZReader.o: $(SDIR)/GZReader.cpp $(SDIR)/GZReader.h
 	$(CXX) $(CXXFLAGS) $(OPT) -c $(SDIR)/$*.cpp
 
@@ -46,7 +43,7 @@ distclean: clean
 dist:
 	tar -zcf $(ARCHIVE).tar.gz src Makefile README.md sickle.xml LICENSE
 
-build: Batch.o GZReader.o FQEntry.o trim.o trim_single.o trim_paired.o sickle.o print_record.o
+build: Batch.o GZReader.o FQEntry.o trim.o trim_single.o trim_paired.o sickle.o
 	$(CXX) $(CXXFLAGS) $(LDFLAGS) $(OPT) $? -o sickle $(LIBS)
 
 debug:
