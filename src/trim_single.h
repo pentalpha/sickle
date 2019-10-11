@@ -14,7 +14,7 @@ public:
         cutsites** saved_cutsites, long last_index, int thread_n);
     void usage(int status, char const *msg);
     void output_single(std::vector<std::vector<FQEntry*>* > queues, bool** filtered_reads, 
-        cutsites*** saved_cutsites, vector<long> last_index);
+        cutsites*** saved_cutsites, vector<long> last_index, Batch* batch);
     int init_streams();
     void close_streams();
 };
