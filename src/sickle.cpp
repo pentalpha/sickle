@@ -6,6 +6,8 @@
 #include <stdio.h>
 #include <getopt.h>
 #include <string.h>
+#include <thread>
+#include "GZReader.h"
 #include "sickle.h"
 #include "trim.h"
 #include "trim_single.h"
@@ -25,6 +27,43 @@ se\tsingle-end sequence trimming\n\
 	exit (status);
 }
 
+void free_vector(vector<const char*>* lines){
+	for(int i = 0; i < lines->size(); i++){
+		delete(lines->at(i));
+	}
+	delete(lines);
+}
+
+int test_gzreader_lines(char* path, char* batch_len){
+	int batch_in_bytes = atoi(batch_len)*1024*1024;
+	GZReader reader(path, batch_in_bytes);
+	int all_lines = 0;
+	int batchs = 0;
+	while(!reader.reached_end()){
+		vector<const char*>* lines = reader.read_lines();
+		//std::cout << lines->size() << " lines" << std::endl;
+		//all_lines += lines->size();
+		//batchs += 1;
+		//std::cout << "batch " << batchs << std::endl;
+		std::thread deleter(free_vector, lines);
+		deleter.detach();
+		/*for(int i = 0; i < lines->size(); i++){
+			const char* line = lines->at(i);
+			if(line[strlen(line)] != '\0'){
+				std::cout << "newline: " << i << std::endl;
+				std::cout << "non null terminated" << std::endl;
+				std::cout << line << std::endl;
+				std::cout << "printed" << std::endl;
+				exit(1);
+			}
+		}
+		std::cout << "all okay";*/
+	}
+	std::cout << "total of " << all_lines << " lines" << std::endl;
+	exit(0);
+}
+
+
 int main (int argc, char *argv[]) {
 	msg("Main func");
 	int retval=0;
@@ -33,7 +72,11 @@ int main (int argc, char *argv[]) {
 		&& strcmp (argv[1],"se") != 0
 		&& strcmp (argv[1],"--version") != 0
 		&& strcmp (argv[1],"--help") != 0)) {
-		main_usage (EXIT_FAILURE);
+		if (strcmp (argv[1],"gzreader") == 0) {
+			test_gzreader_lines (argv[2], argv[3]);
+		}else{
+			main_usage (EXIT_FAILURE);
+		}
 	}
 
 	if (strcmp (argv[1],"--version") == 0) {

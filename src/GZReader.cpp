@@ -3,7 +3,12 @@
 #include "GZReader.h"
 
 
-GZReader::GZReader(char* path, int batch_len){
+GZReader::GZReader(char* path, int batch_len, bool interleaved){
+    if(interleaved){
+        min_lines_in_batch = 8;
+    }else{
+        min_lines_in_batch = 4;
+    }
     std::cout << "Building reader for " << path << "\n";
     file = gzopen(path, "r");
     if (!file) {
@@ -21,32 +26,15 @@ GZReader::~GZReader(){
     //msg("closed gzfile");
 }
 
-Batch* GZReader::get_batch()
+Batch* GZReader::get_batch_buffering_lines()
 {
     if(eof) return NULL;
-    auto[chars, n_chars] = read_n_chars(batch_len);
-    Batch* batch = new Batch(chars);
-    if(batch->has_lines()){
+    vector<const char*>* lines = read_lines();
+    if(lines->size() > 0){
+        Batch* batch;
+        batch = new Batch(lines);
         return batch;
-    }else{
         return NULL;
-    }
-}
-
-Batch* GZReader::get_batch(string remains)
-{
-    if(eof && remains.length()==0) return NULL;
-    auto[chars, n_chars] = read_n_chars(batch_len);
-    string* str;
-    if(eof){
-        str = new string(remains + string(chars) + "\n");
-    }else{
-        str = new string(remains + string(chars));
-    }
-    delete(chars);
-    Batch* batch = new Batch(str->c_str());
-    if(batch->has_lines()){
-        return batch;
     }else{
         return NULL;
     }
@@ -67,6 +55,82 @@ tuple<const char*, int> GZReader::read_n_chars(int n_chars){
     msg("Finished reading buffer");
     return {big_buffer, chars_read};
 }
+
+vector<const char*>* GZReader::read_lines(){
+    vector<const char*>* lines = new vector<const char*>();
+    int remaining = batch_len;
+    char *buffer = last_lines_buffer;
+    if(buffer == NULL){
+        buffer = new char[batch_len];
+    }
+    char* line;
+    size_t line_len;
+    if(last_remainder != NULL){
+        for(int i = 0; i < last_remainder->size(); i++){
+            const char* line = (*last_remainder)[i];
+            line_len = strlen(line);
+            remaining -= line_len;
+            lines->push_back(line);
+        }
+    }
+    do{
+        if(!gzgets(file,buffer,batch_len)){
+            eof = true;
+            break;
+        }
+        line_len = strlen(buffer)-1;
+        remaining -= line_len;
+        if(buffer[line_len-1] != '\n'){
+            line_len += 1;
+        }
+        line = new char[line_len+1];
+        strncpy(line, buffer, line_len);
+        line[line_len-1] = '\0';
+        //msg(line);
+        lines->push_back(line);
+        //msg("stored new line");
+    }while(remaining > 0);
+    /*if(buffer){
+        delete(buffer);
+    }*/
+
+    //msg("read lines from buffer");
+    if(last_remainder != NULL){
+        //msg("deleting last remainder");
+        delete(last_remainder);
+        last_remainder = NULL;
+        //msg("deleted it");
+    }
+    int extra_lines = lines->size() % min_lines_in_batch;
+    if(extra_lines > 0 && lines->size() > 0){
+        //msg("adding extra lines");
+        //msg(to_string(extra_lines));
+        //msg(to_string(lines->size()));
+        last_remainder = new vector<const char*>(extra_lines);
+        for(int i = extra_lines-1; i >= 0; i--){
+            //msg(to_string(i));
+            //msg("to");
+            //msg(to_string(lines->size()-1));
+            //msg("value:");
+            const char* value = lines->at(lines->size()-1);
+            //msg(value);
+            (*last_remainder)[i]= value;
+            //msg("pushed");
+            lines->pop_back();
+            //msg("erased value");
+            //last_remainder[i] = lines[last_remainder->size()-extra_lines+i];
+        }
+        //msg("added them");
+        //msg(to_string(last_remainder->size()));
+        /*for(int i = 0; i < extra_lines; i++){
+            lines->erase(lines->end());
+        }*/
+        //msg("erased from lines");
+    }
+
+    return lines;
+}
+
 
 LoadException::LoadException(const std::string& message){
     this->message_ = message;

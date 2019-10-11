@@ -26,6 +26,8 @@ static struct option single_long_options[] = {
     {"discard-n", no_argument, 0, 'n'},
     {"gzip-output", no_argument, 0, 'g'},
     {"quiet", no_argument, 0, 'z'},
+    {"threads", no_argument, 0, 'a'},
+    {"batch", no_argument, 0, 'b'},
     {GETOPT_HELP_OPTION_DECL},
     {GETOPT_VERSION_OPTION_DECL},
     {NULL, 0, NULL, 0}
@@ -55,8 +57,8 @@ Options:\n\
 
 Trim_Single::Trim_Single(){
     msg("Building trimmer");
-    threads=DEFAULT_THREADS; //TODO: add thread number argument
-    batch_len=DEFAULT_BATCH_LEN; //TODO: add batch length argument
+    threads=1;
+    batch_len=1024*1024*DEFAULT_BATCH_LEN;
 
     qualtype = -1;
     length_threshold = 20;
@@ -81,7 +83,7 @@ int Trim_Single::parse_args(int argc, char *argv[]){
     std::cout << "Setting se trimming params\n";
     while (1) {
         int option_index = 0;
-        optc = getopt_long(argc, argv, "df:t:o:q:l:zxng", single_long_options, &option_index);
+        optc = getopt_long(argc, argv, "df:t:o:q:a:b:l:zxng", single_long_options, &option_index);
 
         if (optc == -1)
             break;
@@ -149,6 +151,14 @@ int Trim_Single::parse_args(int argc, char *argv[]){
             debug = 1;
             break;
 
+        case 'a':
+            threads = atoi(optarg);
+            break;
+
+        case 'b':
+            batch_len = 1024*1024*(atoi(optarg));
+            break;
+
         case_GETOPT_HELP_CHAR(usage)
         case_GETOPT_VERSION_CHAR(PROGRAM_NAME, VERSION, AUTHORS);
 
@@ -186,7 +196,7 @@ int Trim_Single::trim_main() {
         return res;
     }
 
-    msg("Creating queues");
+    //msg("Creating queues");
     std::vector<std::vector<FQEntry*>* > queues;
     std::vector<long> queue_lens;
     std::vector<long> last_item;
@@ -197,19 +207,15 @@ int Trim_Single::trim_main() {
     }
     bool** filtered_reads = new bool*[threads];
     cutsites*** saved_cutsites = new cutsites**[threads];
-    msg("Finished creating queues");
+    //msg("Finished creating queues");
     Batch* batch = NULL;
     while(true){
         for (int i = 0; i < threads; i++){
             last_item[i] = -1;
             queue_lens[i] = 0;
         }
-        msg("Reading new batch");
-        if(batch == NULL){
-            batch = input->get_batch();
-        }else{
-            batch = input->get_batch(batch->get_remainder());
-        }
+        //msg("Reading new batch");
+        batch = input->get_batch_buffering_lines();
 
         if(batch == NULL){
             msg("No batch returned, exiting.");
@@ -235,27 +241,27 @@ int Trim_Single::trim_main() {
             int smallest_queue = 0;
             bool fitted_in_a_queue = false;
             for(unsigned i = 0; i < queues.size(); i++){
-                std::vector<FQEntry*>* queue = queues[i];
+                /*std::vector<FQEntry*>* queue = queues[i];
                 if(queue_lens[i] + read_len < max_queue_len){
                     queue->emplace(queue->begin()+last_item[i]+1, fqrec);
 
                     queue_lens[i] += read_len;
                     fitted_in_a_queue = true;
                     last_item[i] += 1;
-                }
+                }*/
                 if(queue_lens[i] < queue_lens[smallest_queue]){
                     smallest_queue = i;
                 }
-                if(fitted_in_a_queue) break;
+                //if(fitted_in_a_queue) break;
             }
 
-            if(!fitted_in_a_queue){
+            //if(!fitted_in_a_queue){
                 queues[smallest_queue]->emplace(queues[smallest_queue]->begin()+last_item[smallest_queue]+1, fqrec);
                 queue_lens[smallest_queue] += read_len;
 
-                fitted_in_a_queue = true;
+                //fitted_in_a_queue = true;
                 last_item[smallest_queue] += 1;
-            }
+            //}
         }
 
         for (int i = 0; i < threads; i++){
@@ -269,16 +275,17 @@ int Trim_Single::trim_main() {
                 }
             }*/
             saved_cutsites[i] = new cutsites*[queues[i]->size()];
+            //msg(string("queue len for ") + to_string(i) + string(" is ") + to_string(queue_lens[i]));
         }
 
-        msg(string("Batch length of ") + to_string(chars_read_from_batch));
-        msg(string("Max is ") + to_string(batch_len));
+        //msg(string("Batch length of ") + to_string(chars_read_from_batch));
+        //msg(string("Max is ") + to_string(batch_len));
 
         if(chars_read_from_batch == 0){
             break;
         }
 
-        msg("Starting threads");
+        //msg("Starting threads");
         vector<thread> running;
         for(int thread_n = 0; thread_n < threads; thread_n++){
             running.push_back(thread(&Trim_Single::processing_thread,
@@ -288,10 +295,10 @@ int Trim_Single::trim_main() {
             //processing_thread(queues[thread_n], filtered_reads[thread_n], saved_cutsites[thread_n], thread_n);
         }
 
-        msg("Joining all");
+        //msg("Joining all");
         std::for_each(running.begin(),running.end(), std::mem_fn(&std::thread::join));
 
-        output_single(queues, filtered_reads, saved_cutsites, last_item);
+        output_single(queues, filtered_reads, saved_cutsites, last_item, batch);
     }
 
     if (!quiet) fprintf(stdout, "\nSE input file: %s\n\nTotal FastQ records: %d\nFastQ records kept: %d\nFastQ records discarded: %d\n\n", infn, total, kept, discard);
@@ -323,28 +330,36 @@ void Trim_Single::processing_thread(std::vector<FQEntry*>* local_queue, bool* fi
 
 void Trim_Single::output_single(std::vector<std::vector<FQEntry*>* > queues,
     bool** filtered_reads, cutsites*** saved_cutsites,
-    vector<long> last_index)
+    vector<long> last_index, Batch* batch)
 {
     msg("Making results string");
     std::stringstream to_print;
     for (size_t i = 0; i < threads; i++){
-        for (size_t j = 0; j <= last_index[i]; j++)
-        {
-            if(filtered_reads[i][j]){
-                discard++;
-            }else{
-                FQEntry* read = queues[i]->at(j);
-                cutsites* cs = saved_cutsites[i][j];
-                to_print << read->name << "\n";
-                to_print << read->seq.substr(cs->five_prime_cut, cs->three_prime_cut - cs->five_prime_cut) << "\n";
-                to_print << read->comment << "\n";
-                to_print << read->qual.substr(cs->five_prime_cut, cs->three_prime_cut - cs->five_prime_cut) << "\n";
+        //msg("Processing thread");
+        if(!queues[i]->empty()){
+            for (size_t j = 0; j <= last_index[i]; j++)
+            {
+                
+                //msg("Parsing read");
+                if(filtered_reads[i][j]){
+                    discard++;
+                }else{
+                    FQEntry* read = queues[i]->at(j);
+                    cutsites* cs = saved_cutsites[i][j];
+                    to_print << read->name << "\n";
+                    to_print << read->seq.substr(cs->five_prime_cut, cs->three_prime_cut - cs->five_prime_cut) << "\n";
+                    to_print << read->comment << "\n";
+                    to_print << read->qual.substr(cs->five_prime_cut, cs->three_prime_cut - cs->five_prime_cut) << "\n";
 
-                kept++;
-                free(read);
-                free(cs);
+                    kept++;
+                    free(read);
+                    free(cs);
+                }
+                //msg("Parsed read");
             }
         }
+        
+        //msg("Processed thread");
     }
 
     total = kept + discard;
@@ -358,11 +373,15 @@ void Trim_Single::output_single(std::vector<std::vector<FQEntry*>* > queues,
         gzprintf(outfile_gzip, "%s", to_print.str());
     }
     msg("Finished outputing results");
+
+    msg("Deleting batch");
+    batch->free_this();
+    msg("Batch deleted");
 }
 
 int Trim_Single::init_streams(){
     msg("Initializing streams");
-    input = new GZReader(infn, batch_len);
+    input = new GZReader(infn, batch_len, false);
     if (!input) {
         fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", infn);
         return EXIT_FAILURE;

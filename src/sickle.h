@@ -24,7 +24,7 @@
 #endif
 
 #ifndef DEFAULT_BATCH_LEN
-#define DEFAULT_BATCH_LEN 1024*1024*512
+#define DEFAULT_BATCH_LEN 1000
 #endif
 
 /* Options drawn from GNU's coreutils/src/system.h */

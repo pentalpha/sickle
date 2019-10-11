@@ -102,6 +102,14 @@
 			<validator type="in_range" min="0" message="Minimum value is 0"/>
 		</param>
 
+		<param name="threads" value="1" type="integer" optional="true" label="Number of Threads">
+			<validator type="in_range" min="1" message="Minimum value is 1"/>
+		</param>
+
+		<param name="batch" value="1000" type="integer" optional="true" label="Length, in megabytes, of the input batch.">
+			<validator type="in_range" min="1" message="Minimum value is 1"/>
+		</param>
+
 		<param name="no_five_prime" type="boolean" label="Don't do 5' trimming"/>
 		<param name="trunc_n" type="boolean" label="Truncate sequences with Ns at first N position"/>
 	</inputs>

@@ -29,6 +29,8 @@ static struct option paired_long_options[] = {
     {"gzip-output", no_argument, 0, 'g'},
     {"output-combo-all", required_argument, 0, 'M'},
     {"quiet", no_argument, 0, 'z'},
+    {"threads", no_argument, 0, 'a'},
+    {"batch", no_argument, 0, 'b'},
     {GETOPT_HELP_OPTION_DECL},
     {GETOPT_VERSION_OPTION_DECL},
     {NULL, 0, NULL, 0}
@@ -73,8 +75,8 @@ Global options\n\
 }
 
 Trim_Paired::Trim_Paired(){
-    threads=DEFAULT_THREADS; //TODO: add thread number argument
-    batch_len=DEFAULT_BATCH_LEN; //TODO: add batch length argument
+    threads=1;
+    batch_len=1024*1024*DEFAULT_BATCH_LEN;
 
     input = NULL;          /* forward input file handle */
     input2 = NULL;          /* reverse input file handle */
@@ -114,7 +116,7 @@ int Trim_Paired::parse_args(int argc, char *argv[]){
     extern char *optarg;
     while (1) {
         int option_index = 0;
-        optc = getopt_long(argc, argv, "df:r:c:t:o:p:m:M:s:q:l:xng", paired_long_options, &option_index);
+        optc = getopt_long(argc, argv, "df:r:c:t:o:p:m:M:s:q:a:b:l:xng", paired_long_options, &option_index);
 
         if (optc == -1)
             break;
@@ -211,6 +213,14 @@ int Trim_Paired::parse_args(int argc, char *argv[]){
             debug = 1;
             break;
 
+        case 'a':
+            threads = atoi(optarg);
+            break;
+
+        case 'b':
+            batch_len = 1024*1024*(atoi(optarg));
+            break;
+
         case_GETOPT_HELP_CHAR(usage);
         case_GETOPT_VERSION_CHAR(PROGRAM_NAME, VERSION, AUTHORS);
 
@@ -285,11 +295,7 @@ int Trim_Paired::trim_main() {
         }
 
         //msg("Reading new batch");
-        if(batch == NULL){
-            batch = input->get_batch();
-        }else{
-            batch = input->get_batch(batch->get_remainder());
-        }
+        batch = input->get_batch_buffering_lines();
         //msg("Read new batch");
         if(batch == NULL){
             msg("No batch returned, exiting.");
@@ -298,11 +304,7 @@ int Trim_Paired::trim_main() {
 
         if(!input_inter){
             //msg("Reading batch2");
-            if(batch2 == NULL){
-                batch2 = input2->get_batch();
-            }else{
-                batch2 = input2->get_batch(batch2->get_remainder());
-            }
+            batch2 = input2->get_batch_buffering_lines();
             //msg("Read batch2");
 
             if(batch2 == NULL){
@@ -372,7 +374,7 @@ int Trim_Paired::trim_main() {
 
             //msg("Looking for queue to fit read into it");
             for(unsigned i = 0; i < queues.size(); i++){
-                std::vector<FQEntry*>* queue = queues[i];
+                /*std::vector<FQEntry*>* queue = queues[i];
                 std::vector<FQEntry*>* queue2 = queues2[i];
                 if(queue_lens[i] + read_len < max_queue_len)
                 {
@@ -382,11 +384,11 @@ int Trim_Paired::trim_main() {
                     queue_lens2[i] += read_len2;
                     fitted_in_a_queue = true;
                     last_item[i] += 1;
-                }
+                }*/
                 if(queue_lens[i] < queue_lens[smallest_queue]){
                     smallest_queue = i;
                 }
-                if(fitted_in_a_queue) break;
+                //if(fitted_in_a_queue) break;
             }
             //msg("Found");
             if(!fitted_in_a_queue){
@@ -630,7 +632,7 @@ int Trim_Paired::init_streams(){
             }
         }
 
-        input_inter = new GZReader(infnc, batch_len);
+        input_inter = new GZReader(infnc, batch_len, true);
         if (!input_inter) {
             fprintf(stderr, "****Error: Could not open combined input file '%s'.\n\n", infnc);
             return EXIT_FAILURE;
