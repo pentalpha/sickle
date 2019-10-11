@@ -64,9 +64,10 @@ Global options\n\
 -l, --length-threshold, Threshold to keep a read based on length after trimming. Default 20.\n\
 -x, --no-fiveprime, Don't do five prime trimming.\n\
 -n, --truncate-n, Truncate sequences at position of first N.\n\
--a, --threads, Number of threads to use. Default: 1.\n\
+-a, --threads, Number of threads to use. Default and minimum: 1.\n\
 -b, --batch, MB of data to read from the input file at each cycle.\n\
-\tThe greater the value, the greater the memory usage. ");
+\tThe greater the value, the greater the memory usage. The value, multiplied by 1024^2, must be \n\
+\tbigger than the lenght of the longest read. Minimum 1. Default: 1000.\n");
 
 
     fprintf(stderr, "-g, --gzip-output, Output gzipped files.\n--quiet, do not output trimming info\n\

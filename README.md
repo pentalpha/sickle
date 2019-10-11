@@ -1,3 +1,11 @@
+## Parallel Sickle
+
+This fork is a version of the original Sickle repository (Joshi NA, Fass JN. (2011)) modified to enable parallelism and faster IO. It is faster both in multi-thread and single-thread mode. Two new command-line arguments were added:
+
+    -a, --threads, Number of threads to use. Default and minimum: 1;
+
+    -b, --batch, MBs of data to read from the input file at each cycle. The greater the value, the greater the memory usage. The value, multiplied by 1024^2, must be bigger than the lenght of the longest line. Minimum 1. Default: 1000;
+
 # sickle - A windowed adaptive trimming tool for FASTQ files using quality
 
 ## About
