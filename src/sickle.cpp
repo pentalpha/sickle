@@ -7,6 +7,16 @@
 #include <getopt.h>
 #include <string.h>
 #include <thread>
+#include <algorithm>
+#include <iostream>
+#include <cstring>
+
+// for mmap:
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <fcntl.h>
+#include <queue>
+#include <vector>
 #include "GZReader.h"
 #include "sickle.h"
 #include "trim.h"
@@ -34,32 +44,132 @@ void free_vector(vector<const char*>* lines){
 	delete(lines);
 }
 
+
+void read_allocating(char const *path, int buff_size, vector<size_t>* empty){
+	FILE* fp = fopen(path, "r");
+	if (fp == NULL)
+		exit(EXIT_FAILURE);
+
+	//char* line = NULL;
+	size_t len = 0;
+	size_t lines = 0;
+	while (true) {
+		//printf("%s", line);
+		char* line = NULL;
+		if(getline(&line, &len, fp) == -1){
+			break;
+		}else{
+			lines++;
+			//free(line);
+			empty->push_back(lines);
+		}
+	}
+
+	fclose(fp);
+	//if (line){
+	//	free(line);
+	//}
+	msg(to_string(lines));
+}
+
+void consumer(vector<size_t>* empty){
+	int last_consumed = 0;
+	while(true){
+		
+	}
+}
+
+static uintmax_t wc(char const *fname, int buff_size)
+{
+	msg("started wc");
+    int BUFF_SIZE = buff_size*1024;
+    int fd = open(fname, O_RDONLY);
+    if(fd == -1){
+		msg(to_string(fd));
+		error("open");
+		return 0;
+	}else{
+		msg("opened file");
+	}
+
+    /* Advise the kernel of our access pattern.  */
+    posix_fadvise(fd, 0, 0, 1);  // FDADVICE_SEQUENTIAL
+	msg("Advised kernel");
+    char buf[BUFF_SIZE + 1];
+    uintmax_t lines = 0;
+	size_t bytes_read = read(fd, buf, BUFF_SIZE);
+	size_t total_bytes = 0;
+	msg("Read first bytes");
+    while(true)
+    {
+        if(bytes_read == (size_t)-1){
+            msg("read failed");
+			break;
+		}else if (!bytes_read){
+			msg("no bytes read, leaving");
+            break;
+		}else{
+			//msg("counting lines");
+        	for(char *p = buf; (p = (char*) memchr(p, '\n', (buf + bytes_read) - p)); ++p){
+            	++lines;
+			}
+
+			bytes_read = read(fd, buf, BUFF_SIZE);
+			//total_bytes += bytes_read;
+		}
+    }
+
+	msg("finished wc");
+	msg(to_string(total_bytes));
+    return lines;
+}
+
 int test_gzreader_lines(char* path, char* batch_len){
 	int batch_in_bytes = atoi(batch_len)*1024*1024;
-	GZReader reader(path, batch_in_bytes);
+	/*GZReader input(path, batch_in_bytes);
 	int all_lines = 0;
 	int batchs = 0;
-	while(!reader.reached_end()){
-		vector<const char*>* lines = reader.read_lines();
-		//std::cout << lines->size() << " lines" << std::endl;
-		//all_lines += lines->size();
-		//batchs += 1;
-		//std::cout << "batch " << batchs << std::endl;
-		std::thread deleter(free_vector, lines);
-		deleter.detach();
-		/*for(int i = 0; i < lines->size(); i++){
-			const char* line = lines->at(i);
-			if(line[strlen(line)] != '\0'){
-				std::cout << "newline: " << i << std::endl;
-				std::cout << "non null terminated" << std::endl;
-				std::cout << line << std::endl;
-				std::cout << "printed" << std::endl;
-				exit(1);
-			}
-		}
-		std::cout << "all okay";*/
+	Batch* batch;
+	while(!input.reached_end()){
+		batch = input.get_batch_buffering_lines();
+		all_lines += batch->n_lines();
+        if(batch == NULL){
+            msg("No batch returned, exiting.");
+            break;
+        }
+		//msg(to_string(all_lines));
+		batch->free_this();
+		delete(batch);
 	}
 	std::cout << "total of " << all_lines << " lines" << std::endl;
+	*/
+	/*gzFile file = gzopen(path, "r");
+	if (!file) {
+        fprintf(stderr, "****Error: Could not open input file '%s'.\n\n", path);
+    }
+	msg("Allocating buffer");
+	char* big_buffer = new char[batch_in_bytes+1];
+	msg("Buffer allocated");
+	unsigned long total_chars = 0;
+	while(true){
+		int chars_read = gzread(file, big_buffer, batch_in_bytes);
+		if(chars_read < batch_in_bytes){
+			break;
+		}
+		total_chars += chars_read;
+		big_buffer[chars_read] = '\0';
+	}
+	msg(to_string((float)batch_in_bytes / (float)total_chars)+string(" was the len of the batch size."));*/
+	/*int lines = wc(path, atoi(batch_len));
+	msg(to_string(lines));*/
+	msg("1");
+	vector<size_t>* empty = new vector<size_t>;
+	msg("1");
+	std::thread producer(read_allocating, path, atoi(batch_len), empty);
+	msg("1");
+	producer.join();
+	msg("1");
+	//read_allocating(path, atoi(batch_len));
 	exit(0);
 }
 

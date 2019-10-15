@@ -218,7 +218,7 @@ int Trim_Single::trim_main() {
             last_item[i] = -1;
             queue_lens[i] = 0;
         }
-        //msg("Reading new batch");
+        msg("Reading new batch");
         batch = input->get_batch_buffering_lines();
 
         if(batch == NULL){
@@ -227,6 +227,8 @@ int Trim_Single::trim_main() {
         }
 
         int batch_len = batch->sequences_len;
+        msg("batch seq len is ");
+        msg(to_string(batch_len));
         long chars_read_from_batch = 0;
         int max_queue_len = batch_len / threads;
         /*msg("Reading big batch");
@@ -282,7 +284,7 @@ int Trim_Single::trim_main() {
             //msg(string("queue len for ") + to_string(i) + string(" is ") + to_string(queue_lens[i]));
         }
 
-        //msg(string("Batch length of ") + to_string(chars_read_from_batch));
+        msg(string("Batch length of ") + to_string(chars_read_from_batch));
         //msg(string("Max is ") + to_string(batch_len));
 
         if(chars_read_from_batch == 0){
