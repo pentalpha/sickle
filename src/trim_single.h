@@ -2,6 +2,7 @@
 #define _TRIMSINGLE_
 
 #include <vector>
+#include <mutex>
 #include "trim.h"
 
 class Trim_Single : public Abstract_Trimmer{
@@ -17,6 +18,8 @@ public:
         cutsites*** saved_cutsites, vector<long> last_index, Batch* batch);
     int init_streams();
     void close_streams();
+private:
+    mutex batch_lock;
 };
 
 #endif
