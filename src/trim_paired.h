@@ -32,19 +32,19 @@ protected:
         vector<long> last_index);
     GZReader* input2;
     GZReader* input_inter;
-    FILE *outfile2;      /* reverse output file handle */
-    FILE *outfile_combo;         /* combined output file handle */
-    FILE *outfile_single;
+    std::ofstream outfile2;      /* reverse output file handle */
+    std::ofstream outfile_interleaved;         /* interleaved output file handle */
+    std::ofstream outfile_single;
     gzFile outfile2_gzip;
-    gzFile combo_gzip;
+    gzFile interleaved_gzip;
     gzFile single_gzip;
-    int combo_s, combo_all;
+    int interleaved_s;
     
     char *outfn2;        /* reverse file out name */
-    char *outfnc;        /* combined file out name */
-    char *sfn;           /* single/combined file out name */
+    char *outfnc;        /* interleaved file out name */
+    char *sfn;           /* single/interleaved file out name */
     char *infn2;         /* reverse input filename */
-    char *infnc;         /* combined input filename */
+    char *infnc;         /* interleaved input filename */
 
     int kept_p;
     int discard_p;

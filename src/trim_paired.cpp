@@ -17,17 +17,16 @@ static struct option paired_long_options[] = {
     {"qual-type", required_argument, 0, 't'},
     {"pe-file1", required_argument, 0, 'f'},
     {"pe-file2", required_argument, 0, 'r'},
-    {"pe-combo", required_argument, 0, 'c'},
+    {"pe-interleaved", required_argument, 0, 'c'},
     {"output-pe1", required_argument, 0, 'o'},
     {"output-pe2", required_argument, 0, 'p'},
     {"output-single", required_argument, 0, 's'},
-    {"output-combo", required_argument, 0, 'm'},
+    {"output-interleaved", required_argument, 0, 'm'},
     {"qual-threshold", required_argument, 0, 'q'},
     {"length-threshold", required_argument, 0, 'l'},
     {"no-fiveprime", no_argument, 0, 'x'},
     {"truncate-n", no_argument, 0, 'n'},
     {"gzip-output", no_argument, 0, 'g'},
-    {"output-combo-all", required_argument, 0, 'M'},
     {"quiet", no_argument, 0, 'z'},
     {"threads", no_argument, 0, 'a'},
     {"batch", no_argument, 0, 'b'},
@@ -43,7 +42,7 @@ void Trim_Paired::usage (int status, char const *msg) {
     fprintf(stderr, "If you have one file with interleaved forward and reverse reads:\n");
     fprintf(stderr, "Usage: %s pe [options] -c <interleaved input file> -t <quality type> -m <interleaved trimmed paired-end output> -s <trimmed singles file>\n\n\
 If you have one file with interleaved reads as input and you want ONLY one interleaved file as output:\n\
-Usage: %s pe [options] -c <interleaved input file> -t <quality type> -M <interleaved trimmed output>\n\n", PROGRAM_NAME, PROGRAM_NAME);
+Usage: %s pe [options] -c <interleaved input file> -t <quality type> -m <interleaved trimmed output>\n\n", PROGRAM_NAME, PROGRAM_NAME);
     fprintf(stderr, "Options:\n\
 Paired-end separated reads\n\
 --------------------------\n\
@@ -53,10 +52,8 @@ Paired-end separated reads\n\
 -p, --output-pe2, Output trimmed reverse fastq file. Must use -s option.\n\n\
 Paired-end interleaved reads\n\
 ----------------------------\n");
-    fprintf(stderr,"-c, --pe-combo, Combined (interleaved) input paired-end fastq\n\
--m, --output-combo, Output combined (interleaved) paired-end fastq file. Must use -s option.\n\
--M, --output-combo-all, Output combined (interleaved) paired-end fastq file with any discarded read written to output file as a single N. Cannot be used with the -s option.\n\n\
-Global options\n\
+    fprintf(stderr,"-c, --pe-interleaved, Combined (interleaved) input paired-end fastq\n\
+-m, --output-interleaved, Output combined (interleaved) paired-end fastq file. Must use -s option.\n\
 --------------\n\
 -t, --qual-type, Type of quality values (solexa (CASAVA < 1.3), illumina (CASAVA 1.3 to 1.7), sanger (which is CASAVA >= 1.8)) (required)\n");
     fprintf(stderr, "-s, --output-single, Output trimmed singles fastq file\n\
@@ -84,24 +81,20 @@ Trim_Paired::Trim_Paired(){
 
     input = NULL;          /* forward input file handle */
     input2 = NULL;          /* reverse input file handle */
-    input_inter = NULL;          /* combined input file handle */
-    outfile = NULL;      /* forward output file handle */
-    outfile2 = NULL;      /* reverse output file handle */
-    outfile_combo = NULL;         /* combined output file handle */
-    outfile_single = NULL;        /* single output file handle */
+    input_inter = NULL;          /* interleaved input file handle */
     outfile_gzip = NULL;
     outfile2_gzip = NULL;
-    combo_gzip = NULL;
+    interleaved_gzip = NULL;
     single_gzip = NULL;
     debug = 0;
     qualtype = -1;
     outfn = NULL;        /* forward file out name */
     outfn2 = NULL;        /* reverse file out name */
-    outfnc = NULL;        /* combined file out name */
-    sfn = NULL;           /* single/combined file out name */
+    outfnc = NULL;        /* interleaved file out name */
+    sfn = NULL;           /* single file out name */
     infn = NULL;         /* forward input filename */
     infn2 = NULL;         /* reverse input filename */
-    infnc = NULL;         /* combined input filename */
+    infnc = NULL;         /* interleaved input filename */
 
     length_threshold = 20;
     qual_threshold = 20;
@@ -110,9 +103,7 @@ Trim_Paired::Trim_Paired(){
     no_fiveprime = 0;
     trunc_n = 0;
     gzip_output = 0;
-
-    combo_all = 0;
-    combo_s = 0;
+    interleaved_s = 0;
 }
 
 int Trim_Paired::parse_args(int argc, char *argv[]){
@@ -167,13 +158,7 @@ int Trim_Paired::parse_args(int argc, char *argv[]){
         case 'm':
             outfnc = (char *) malloc(strlen(optarg) + 1);
             strcpy(outfnc, optarg);
-            combo_s = 1;
-            break;
-
-        case 'M':
-            outfnc = (char *) malloc(strlen(optarg) + 1);
-            strcpy(outfnc, optarg);
-            combo_all = 1;
+            interleaved_s = 1;
             break;
 
         case 's':
@@ -291,6 +276,8 @@ int Trim_Paired::trim_main() {
 
     Batch* batch = NULL;
     Batch* batch2 = NULL;
+    int last_read_position = 0;
+    int last_read_position2 = 0;
     while(true){
         for (int i = 0; i < threads; i++){
             last_item[i] =  -1;
@@ -342,29 +329,20 @@ int Trim_Paired::trim_main() {
 
             //msg("Reading read1");
             //if(input == NULL) msg("input1 is null");
-            if(fqrec){
-                fqrec = new FQEntry(fqrec->position, batch);
-            }else{
-                fqrec = new FQEntry(0, batch);
-            }
+            fqrec = new FQEntry(last_read_position, batch);
+            last_read_position = fqrec->position;
 
             //msg("Reading read2");
             if(input_inter && !batch->has_lines()){
                 error("Reading interleaved pair: read1 loaded, but no read2 to load. Maybe it's not an interleaved file?");
                 exit(EXIT_FAILURE);
             }
-            if(fqrec2){
-                if(input_inter){
-                    fqrec2 = new FQEntry(fqrec->position, batch);
-                }else{
-                    fqrec2 = new FQEntry(fqrec2->position, batch2);
-                }
+            if(input_inter){
+                fqrec2 = new FQEntry(last_read_position, batch);
+                last_read_position = fqrec2->position;
             }else{
-                if(input_inter){
-                    fqrec2 = new FQEntry(0, batch);
-                }else{
-                    fqrec2 = new FQEntry(0, batch2);
-                }
+                fqrec2 = new FQEntry(last_read_position2, batch2);
+                last_read_position2 = fqrec2->position;
             }
 
             //msg("Reads read");
@@ -447,9 +425,14 @@ int Trim_Paired::trim_main() {
             //msg("Joining all");
             std::for_each(running.begin(),running.end(), std::mem_fn(&std::thread::join));
 
+            writing_results_flag = true;
             output_paired(queues, queues2, filtered_reads1, filtered_reads2,
                 saved_cutsites1, saved_cutsites2, last_item);
         }
+    }
+
+    while(writing_results_flag){
+        this_thread::sleep_for(chrono::milliseconds(100));
     }
 
     if (!quiet) {
@@ -564,84 +547,68 @@ void Trim_Paired::output_paired(std::vector<std::vector<FQEntry*>* > queues, std
         msg("Writing plain text");
         if(input_inter){
             msg("Interleaved output");
-            fprintf(outfile_combo, "%s", fq1.str());
-            if(combo_all){
-                fprintf(outfile_combo, "%s", singles.str());
-            }
+            outfile_interleaved << fq1.str();
+            if (sfn) outfile_single << singles.str();
+            //fprintf(outfile_interleaved, "%s", fq1.str());
         }else{
             msg("Separate outputs");
-            fprintf(outfile, "%s", fq1.str());
-            fprintf(outfile2, "%s", fq2.str());
-            if(!combo_all){
-                fprintf(outfile_single, "%s", fq2.str());
-            }else{
-                fprintf(outfile_combo, "%s", fq2.str());
-            }
+            outfile << fq1.str();
+            //fprintf(outfile, "%s", );
+            outfile2 << fq2.str();
+            //fprintf(outfile2, "%s", );
+            if (sfn) outfile_single << singles.str();
+            //fprintf(outfile_single, "%s", fq2.str());
         }
     } else {
         if(input_inter){
-            gzprintf(combo_gzip, "%s", fq1.str());
-            if(combo_all){
-                gzprintf(combo_gzip, "%s", singles.str());
-            }
+            gzprintf(interleaved_gzip, fq1.str().c_str());
+            if (sfn) gzprintf(single_gzip, singles.str().c_str());
         }else{
-            gzprintf(outfile_gzip, "%s", fq1.str());
-            gzprintf(outfile2_gzip, "%s", fq2.str());
-            if(!combo_all){
-                gzprintf(single_gzip, "%s", fq2.str());
-            }else{
-                gzprintf(combo_gzip, "%s", fq2.str());
-            }
+            gzprintf(outfile_gzip, fq1.str().c_str());
+            gzprintf(outfile2_gzip, fq2.str().c_str());
+            if (sfn) gzprintf(single_gzip, singles.str().c_str());
         }
     }
     msg("Finished outputing results");
+    writing_results_flag = false;
 }
 
 int Trim_Paired::init_streams(){
-    if (infnc) {      /* using combined input file */
+    if (infnc) {      /* using interleaved input file */
 
         if (infn || infn2 || outfn || outfn2) {
             usage(EXIT_FAILURE, "****Error: Cannot have -f, -r, -o, or -p options with -c.");
             return EXIT_FAILURE;
         }
 
-        if ((combo_all && combo_s) || (!combo_all && !combo_s)) {
-            usage(EXIT_FAILURE, "****Error: Must have only one of either -m or -M options with -c.");
-            return EXIT_FAILURE;
-        }
-
-        if ((combo_s && !sfn) || (combo_all && sfn)) {
-            usage(EXIT_FAILURE, "****Error: -m option must have -s option, and -M option cannot have -s option.");
-            return EXIT_FAILURE;
-        }
-
         /* check for duplicate file names */
-        if (!strcmp(infnc, outfnc) || (combo_s && (!strcmp(infnc, sfn) || !strcmp(outfnc, sfn)))) {
-            fprintf(stderr, "****Error: Duplicate filename between combo input, combo output, and/or single output file names.\n\n");
+        if (!strcmp(infnc, outfnc) || (interleaved_s && (!strcmp(infnc, sfn) || !strcmp(outfnc, sfn)))) {
+            fprintf(stderr, "****Error: Duplicate filename between interleaved input, interleaved output, and/or single output file names.\n\n");
             return EXIT_FAILURE;
-        }
-
-        /* get combined output file */
-        if (!gzip_output) {
-            outfile_combo = fopen(outfnc, "w");
-            if (!outfile_combo) {
-                fprintf(stderr, "****Error: Could not open combo output file '%s'.\n\n", outfnc);
-                return EXIT_FAILURE;
-            }
-        } else {
-            combo_gzip = gzopen(outfnc, "w");
-            if (!combo_gzip) {
-                fprintf(stderr, "****Error: Could not open combo output file '%s'.\n\n", outfnc);
-                return EXIT_FAILURE;
-            }
         }
 
         input_inter = new GZReader(infnc, batch_len, true);
         if (!input_inter) {
-            fprintf(stderr, "****Error: Could not open combined input file '%s'.\n\n", infnc);
+            fprintf(stderr, "****Error: Could not open interleaved input file '%s'.\n\n", infnc);
             return EXIT_FAILURE;
         }
         input = input_inter;
+
+        /* get interleaved output file */
+        if (!gzip_output) {
+            outfile_interleaved.open(outfnc);
+            //outfile_interleaved = fopen(outfnc, "w");
+            if (!outfile_interleaved) {
+                fprintf(stderr, "****Error: Could not open interleaved output file '%s'.\n\n", outfnc);
+                return EXIT_FAILURE;
+            }
+        } else {
+            interleaved_gzip = gzopen(outfnc, "w");
+            if (!interleaved_gzip) {
+                fprintf(stderr, "****Error: Could not open interleaved output file '%s'.\n\n", outfnc);
+                return EXIT_FAILURE;
+            }
+        }
 
     } else {     /* using forward and reverse input files */
 
@@ -650,7 +617,7 @@ int Trim_Paired::init_streams(){
             return EXIT_FAILURE;
         }
 
-        if (infn && (infnc || combo_all || combo_s)) {
+        if (infn && (infnc || interleaved_s)) {
             usage(EXIT_FAILURE, "****Error: The -f option cannot be used in combination with -c, -m, or -M.");
             return EXIT_FAILURE;
         }
@@ -676,13 +643,14 @@ int Trim_Paired::init_streams(){
         }
 
         if (!gzip_output) {
-            outfile = fopen(outfn, "w");
+            //outfile = fopen(outfn, "w");
+            outfile.open(outfn);
             if (!outfile) {
                 fprintf(stderr, "****Error: Could not open output file '%s'.\n\n", outfn);
                 return EXIT_FAILURE;
             }
-
-            outfile2 = fopen(outfn2, "w");
+            outfile2.open(outfn2);
+            //outfile2 = fopen(outfn2, "w");
             if (!outfile2) {
                 fprintf(stderr, "****Error: Could not open output file '%s'.\n\n", outfn2);
                 return EXIT_FAILURE;
@@ -704,9 +672,9 @@ int Trim_Paired::init_streams(){
     }
 
     /* get singles output file handle */
-    if (sfn && !combo_all) {
+    if (sfn) {
         if (!gzip_output) {
-            outfile_single = fopen(sfn, "w");
+            outfile_single.open(sfn);
             if (!outfile_single) {
                 fprintf(stderr, "****Error: Could not open single output file '%s'.\n\n", sfn);
                 return EXIT_FAILURE;
@@ -739,22 +707,15 @@ void Trim_Paired::close_streams(){
         gzclose(single_gzip);
     }
     if(outfile_single){
-        fclose(outfile_single);
+        outfile_single.close();
     }
     //msg("Deleted single outputs");
 
-    if(combo_gzip){
-        gzclose(combo_gzip);
-    }
-    if(outfile_combo){
-        fclose(outfile_combo);
-    }
-
-    //msg("Deleted combo outputs");
+    //msg("Deleted interleaved outputs");
 
     if (!gzip_output) {
-        if(outfile) fclose(outfile);
-        if(outfile2) fclose(outfile2);
+        if(outfile) outfile.close();
+        if(outfile2) outfile2.close();
     } else {
         if(outfile_gzip) gzclose(outfile_gzip);
         if(outfile2_gzip) gzclose(outfile2_gzip);
