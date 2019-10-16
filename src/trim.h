@@ -1,6 +1,7 @@
 #ifndef _TRIM_
 #define _TRIM_
 
+#include <fstream>
 #include "FQEntry.h"
 #include "GZReader.h"
 
@@ -22,7 +23,7 @@ protected:
     int threads, batch_len;
 
     GZReader* input;
-    FILE *outfile;
+    std::ofstream outfile;
     gzFile outfile_gzip;
     char *outfn;
     char *infn;
@@ -32,6 +33,8 @@ protected:
     int kept;
     int discard;
     int total;
+
+    bool writing_results_flag;
 };
 
 #endif

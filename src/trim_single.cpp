@@ -10,6 +10,7 @@
 #include <sstream>
 #include <thread>
 #include <functional>
+#include <chrono>
 
 #include "FQEntry.h"
 #include "sickle.h"
@@ -71,7 +72,6 @@ Trim_Single::Trim_Single(){
     trunc_n = 0;
     debug = 0;
     input = NULL;
-    outfile = NULL;
     outfile_gzip = NULL;
     outfn = NULL;
     infn = NULL;
@@ -213,6 +213,7 @@ int Trim_Single::trim_main() {
     cutsites*** saved_cutsites = new cutsites**[threads];
     //msg("Finished creating queues");
     Batch* batch = NULL;
+    int last_read_position = 0;
     while(true){
         for (int i = 0; i < threads; i++){
             last_item[i] = -1;
@@ -240,11 +241,8 @@ int Trim_Single::trim_main() {
         int last_queue = threads-1;
         
         while(batch->has_lines()){
-            if(fqrec == NULL){
-                fqrec = new FQEntry(0, batch);
-            }else{
-                fqrec = new FQEntry(fqrec->position, batch);
-            }
+            fqrec = new FQEntry(last_read_position, batch);
+            last_read_position = fqrec->position;
 
             int read_len = fqrec->seq.length();
             chars_read_from_batch += read_len;
@@ -312,13 +310,17 @@ int Trim_Single::trim_main() {
         //msg("Joining all");
         std::for_each(running.begin(),running.end(), std::mem_fn(&std::thread::join));
 
+        writing_results_flag = true;
         thread output_thread(&Trim_Single::output_single,
             this,
             queues, filtered_reads, saved_cutsites, last_item, batch);
         output_thread.detach();
     }
 
-    lock_guard<mutex> guard(batch_lock);
+    //#TODO: USELESS! the program still closes before the output finishs
+    while(writing_results_flag){
+        this_thread::sleep_for(chrono::milliseconds(100));
+    }
 
     if (!quiet) fprintf(stdout, "\nSE input file: %s\n\nTotal FastQ records: %d\nFastQ records kept: %d\nFastQ records discarded: %d\n\n", infn, total, kept, discard);
 
@@ -351,16 +353,15 @@ void Trim_Single::output_single(std::vector<std::vector<FQEntry*>* > queues,
     bool** filtered_reads, cutsites*** saved_cutsites,
     vector<long> last_index, Batch* batch)
 {
+    std::stringstream to_print;
     msg("Making results string");
     lock_guard<mutex> guard(batch_lock);
     //msg("Got the lock to actually make it");
-    std::stringstream to_print;
     for (size_t i = 0; i < threads; i++){
         //msg("Processing thread");
         if(!queues[i]->empty()){
             for (size_t j = 0; j <= last_index[i]; j++)
             {
-                
                 //msg("Parsing read");
                 FQEntry* read = queues[i]->at(j);
                 cutsites* cs = saved_cutsites[i][j];
@@ -379,26 +380,29 @@ void Trim_Single::output_single(std::vector<std::vector<FQEntry*>* > queues,
                 //msg("Parsed read");
             }
         }
-        
         //msg("Processed thread");
     }
 
     total = kept + discard;
-
+    guard.~lock_guard();
     //msg("Finished results string");
-
+    //#TODO:NOT WRITING ANYTHING
     msg("Outputing");
     if (!gzip_output) {
-        fprintf(outfile, "%s", to_print.str());
+        msg(string("writing to ") + string(outfn));
+        outfile << to_print.str();
+        //fprintf(outfile, "%s", to_print.str() );
     } else {
-        gzprintf(outfile_gzip, "%s", to_print.str());
+        gzprintf(outfile_gzip, to_print.str().c_str());
     }
-    msg("Finished outputing results");
 
-    //msg("Deleting batch");
+    msg("Deleting batch");
     batch->free_this();
     delete(batch);
-    //msg("Batch deleted");
+    msg("Batch deleted");
+    //msg("Writing flag");
+    writing_results_flag = false;
+    msg("Finished outputing results");
 }
 
 int Trim_Single::init_streams(){
@@ -410,8 +414,9 @@ int Trim_Single::init_streams(){
     }
 
     if (!gzip_output) {
-        outfile = fopen(outfn, "w");
-        if (!outfile) {
+        //outfile = fopen(outfn, "w");
+        outfile.open(outfn);
+        if (outfile.fail()) {
             fprintf(stderr, "****Error: Could not open output file '%s'.\n\n", outfn);
             return EXIT_FAILURE;
         }
@@ -433,7 +438,7 @@ void Trim_Single::close_streams(){
 
     if (!gzip_output){
         //msg("closing outfile");
-        fclose(outfile);
+        outfile.close();
     }else{
         //msg("closing gz outfile");
         gzclose(outfile_gzip);
