@@ -40,7 +40,7 @@ def get_fastqs_1(path,sep="."):
 def exists(path):
     return os.path.exists(path)
 
-assert(len(sys.argv) == 4)
+assert(len(sys.argv) >= 5)
 
 #print('sys.argv[0] =', sys.argv[0])             
 pathname = os.path.dirname(sys.argv[0])        
@@ -66,8 +66,9 @@ if(mode == "se"):
         fastq = fastqs[i]
         no_extension = file_name(fastq)
         output = output_dir + "/" + no_extension + ".trim.fastq"
+        fastq = input_dir + "/" + fastq
         if not exists(output):
-            runCommand(" ".join(["time", sickle, "-t", qual_type,"-f", fastq, "-o", output, "-a", str(threads), "-b", str(max_batch)]))
+            runCommand(" ".join(["time", sickle, "se", "-t", qual_type,"-f", fastq, "-o", output, "-a", str(threads), "-b", str(max_batch)]))
         else:
             print(output + " already exists, skiping it.")
 elif(mode == "pe"):
@@ -99,7 +100,7 @@ elif(mode == "pe"):
             break
 
         if (not exists(fastq1_new)) and (not exists(fastq2_new)) and (not exists(singles)):
-            code = runCommand(" ".join(["time", sickle, "-t", qual_type, "-f", fastq_1, "-r", fastq_2,
+            code = runCommand(" ".join(["time", sickle, "pe", "-t", qual_type, "-f", fastq_1, "-r", fastq_2,
                 "-o", fastq1_new, "-p", fastq2_new, "-s", singles, "-a", str(threads), "-b", str(max_batch)]))
             if code != 0:
                 break
