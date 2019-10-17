@@ -106,7 +106,7 @@
 			<validator type="in_range" min="1" message="Minimum value is 1"/>
 		</param>
 
-		<param name="batch" value="1000" type="integer" optional="true" label="Length, in megabytes, of the input batch.">
+		<param name="batch" value="512" type="integer" optional="true" label="Maximum length, in megabytes, of the input batch.">
 			<validator type="in_range" min="1" message="Minimum value is 1"/>
 		</param>
 

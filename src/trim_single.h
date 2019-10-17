@@ -3,13 +3,15 @@
 
 #include <vector>
 #include <mutex>
+#include <cstdint>
+#include <experimental/filesystem>
 #include "trim.h"
 
 class Trim_Single : public Abstract_Trimmer{
 public:
     Trim_Single();
     int parse_args(int argc, char *argv[]);
-
+    int recommended_batch_len(const char* path, int max_len);
     int trim_main();
     void processing_thread(std::vector<FQEntry*>* local_queue, bool* filtered, 
         cutsites** saved_cutsites, long last_index, int thread_n);

@@ -5,6 +5,9 @@
 #include <string_view>
 #include <sstream>
 #include <vector>
+#include <mutex>
+#include <cstdint>
+#include <experimental/filesystem>
 #include "trim.h"
 
 
@@ -15,7 +18,7 @@ public:
 
     int trim_main();
     void usage(int status, char const *msg);
-
+    int recommended_batch_len(const char* path, int max_batch_len);
 protected:
     std::string get_read_string(FQEntry* read, cutsites* cs);
     int init_streams();
@@ -52,6 +55,8 @@ protected:
     int kept_s2;
     int discard_s1;
     int discard_s2;
+
+    mutex batch_lock;
 };
 
 #endif

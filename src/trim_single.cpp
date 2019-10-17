@@ -48,9 +48,9 @@ Options:\n\
 -x, --no-fiveprime, Don't do five prime trimming.\n\
 -n, --trunc-n, Truncate sequences at position of first N.\n\
 -g, --gzip-output, Output gzipped files.\n\
--a, --threads, Number of threads to use. Default and minimum: 1.\n\
--b, --batch, MB of data to read from the input file at each cycle.\n\
-\tThe greater the value, the greater the memory usage. The value, multiplied by 1024^2, must be \n\
+-a, --threads, Number of threads to use. Default and minimum: Available cores - 1.\n\
+-b, --batch, maximum MB of data to read from the input file at each cycle.\n\
+\tThe greater the value, the greater the memory usage can be. The value, multiplied by 1024^2, must be \n\
 \tbigger than the lenght of the longest read. Minimum 1. Default: 512.\n\
 --quiet, Don't print out any trimming information\n\
 --help, display this help and exit\n\
@@ -62,7 +62,7 @@ Options:\n\
 
 Trim_Single::Trim_Single(){
     //msg("Building trimmer");
-    threads=1;
+    threads=DEFAULT_THREADS;
     batch_len=1024*1024*DEFAULT_BATCH_LEN;
 
     qualtype = -1;
@@ -185,7 +185,29 @@ int Trim_Single::parse_args(int argc, char *argv[]){
         fprintf(stderr, "****Error: Input file is same as output file.\n\n");
         return EXIT_FAILURE;
     }
+
+    batch_len = recommended_batch_len(infn, batch_len);
+
     return 0;
+}
+
+int Trim_Single::recommended_batch_len(const char* path, int max_batch_len){
+    std::uintmax_t min = 20;
+    std::uintmax_t max = (unsigned) max_batch_len;
+    std::uintmax_t size = std::experimental::filesystem::file_size(path);
+
+    std::uintmax_t recommended = size / 8;
+
+    if(recommended < min){
+        msg(string("Batch size is ") + to_string(min / (1024*1024)) + string("MB"));
+        return (int)min;
+    }else if(recommended > max){
+        msg(string("Batch size is ") + to_string(max / (1024*1024)) + string("MB"));
+        return (int)max;
+    }else{
+        msg(string("Batch size is ") + to_string(recommended / (1024*1024)) + string("MB"));
+        return (int)recommended;
+    }
 }
 
 int Trim_Single::trim_main() {

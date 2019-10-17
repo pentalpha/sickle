@@ -6,7 +6,7 @@ DEBUG = -g
 OPT = -O3
 ARCHIVE = $(PROGRAM_NAME)_$(VERSION)
 LDFLAGS=
-LIBS = -lz -lpthread
+LIBS = -lz -lpthread -lstdc++fs
 SDIR = src
 
 .PHONY: clean default build distclean dist debug

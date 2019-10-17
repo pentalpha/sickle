@@ -4,6 +4,7 @@
 #include <limits.h>
 #include <zlib.h>
 #include <iostream>
+#include <thread>
 
 #define BUFFER_SIZE 4096
 
@@ -20,7 +21,7 @@
 #endif
 
 #ifndef DEFAULT_THREADS
-#define DEFAULT_THREADS 4
+#define DEFAULT_THREADS std::thread::hardware_concurrency();
 #endif
 
 #ifndef DEFAULT_BATCH_LEN

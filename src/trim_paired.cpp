@@ -61,10 +61,10 @@ Paired-end interleaved reads\n\
 -l, --length-threshold, Threshold to keep a read based on length after trimming. Default 20.\n\
 -x, --no-fiveprime, Don't do five prime trimming.\n\
 -n, --truncate-n, Truncate sequences at position of first N.\n\
--a, --threads, Number of threads to use. Default and minimum: 1.\n\
--b, --batch, MB of data to read from the input file at each cycle.\n\
-\tThe greater the value, the greater the memory usage. The value, multiplied by 1024^2, must be \n\
-\tbigger than the lenght of the longest read. Minimum 1. Default: 1000.\n");
+-a, --threads, Number of threads to use. Default and minimum: Available cores - 1.\n\
+-b, --batch, maximum MB of data to read from the input file at each cycle.\n\
+\tThe greater the value, the greater the memory usage can be. The value, multiplied by 1024^2, must be \n\
+\tbigger than the lenght of the longest read. Minimum 1. Default: 512.\n");
 
 
     fprintf(stderr, "-g, --gzip-output, Output gzipped files.\n--quiet, do not output trimming info\n\
@@ -76,7 +76,7 @@ Paired-end interleaved reads\n\
 }
 
 Trim_Paired::Trim_Paired(){
-    threads=1;
+    threads=DEFAULT_THREADS;
     batch_len=1024*1024*DEFAULT_BATCH_LEN;
 
     input = NULL;          /* forward input file handle */
@@ -234,7 +234,32 @@ int Trim_Paired::parse_args(int argc, char *argv[]){
         usage(EXIT_FAILURE, "****Error: Must have either -f OR -c argument.");
         return EXIT_FAILURE;
     }
+    if(infnc)
+        batch_len = recommended_batch_len(infnc, batch_len);
+    else if(infn){
+        batch_len = recommended_batch_len(infn, batch_len);
+    }
+
     return 0;
+}
+
+int Trim_Paired::recommended_batch_len(const char* path, int max_batch_len){
+    std::uintmax_t min = 20;
+    std::uintmax_t max = (unsigned) max_batch_len / 2;
+    std::uintmax_t size = std::experimental::filesystem::file_size(path);
+
+    std::uintmax_t recommended = size / 8;
+
+    if(recommended < min){
+        msg(string("Batch size is ") + to_string(min / (1024*1024)) + string("MB"));
+        return (int)min;
+    }else if(recommended > max){
+        msg(string("Batch size is ") + to_string(max / (1024*1024)) + string("MB"));
+        return (int)max;
+    }else{
+        msg(string("Batch size is ") + to_string(recommended / (1024*1024)) + string("MB"));
+        return (int)recommended;
+    }
 }
 
 int Trim_Paired::trim_main() {
@@ -250,46 +275,51 @@ int Trim_Paired::trim_main() {
     if(res != 0){
         return res;
     }
-    std::vector<std::vector<FQEntry*>* > queues;
-    std::vector<std::vector<FQEntry*>* > queues2;
-
-    std::vector<long> queue_lens;
-    std::vector<long> queue_lens2;
-
-    std::vector<long> last_item;
-
-    bool** filtered_reads1 = new bool*[threads];
-    bool** filtered_reads2 = new bool*[threads];
-
-    cutsites*** saved_cutsites1 = new cutsites**[threads];
-    cutsites*** saved_cutsites2 = new cutsites**[threads];
-
-    for (int i = 0; i < threads; i++){
-        queues.push_back(new std::vector<FQEntry*>());
-        queue_lens.push_back(0);
-        last_item.push_back(-1);
-    }
-    for (int i = 0; i < threads; i++){
-        queues2.push_back(new std::vector<FQEntry*>());
-        queue_lens2.push_back(0);
-    }
-
-    Batch* batch = NULL;
-    Batch* batch2 = NULL;
-    int last_read_position = 0;
-    int last_read_position2 = 0;
+    
+    vector<thread> output_threads;
     while(true){
+        //lock_guard<mutex> guard(batch_lock);
+        msg("Starting batch variables");
+        std::vector<std::vector<FQEntry*>* > queues;
+        std::vector<std::vector<FQEntry*>* > queues2;
+
+        std::vector<long> queue_lens;
+        std::vector<long> queue_lens2;
+
+        std::vector<long> last_item;
+
+        bool** filtered_reads1 = new bool*[threads];
+        bool** filtered_reads2 = new bool*[threads];
+
+        cutsites*** saved_cutsites1 = new cutsites**[threads];
+        cutsites*** saved_cutsites2 = new cutsites**[threads];
+
+        for (int i = 0; i < threads; i++){
+            queues.push_back(new std::vector<FQEntry*>());
+            queue_lens.push_back(0);
+            last_item.push_back(-1);
+        }
+        for (int i = 0; i < threads; i++){
+            queues2.push_back(new std::vector<FQEntry*>());
+            queue_lens2.push_back(0);
+        }
+
+        Batch* batch = NULL;
+        Batch* batch2 = NULL;
+        int last_read_position = 0;
+        int last_read_position2 = 0;
+
         for (int i = 0; i < threads; i++){
             last_item[i] =  -1;
             queue_lens[i] =  0;
             queue_lens2[i] = 0;
         }
 
-        //msg("Reading new batch");
+        msg("Reading new batch");
         batch = input->get_batch_buffering_lines();
         //msg("Read new batch");
         if(batch == NULL){
-            msg("No batch returned, exiting.");
+            msg("No more data, finishing program.");
             break;
         }
 
@@ -316,6 +346,7 @@ int Trim_Paired::trim_main() {
         FQEntry* fqrec = NULL;
         FQEntry* fqrec2 = NULL;
         //msg("Reading reads from batch");
+        int last_queue = 0;
         while(batch->has_lines()){
             if(!input_inter){
                 if(chars_read_from_batch > batch_len){
@@ -354,41 +385,27 @@ int Trim_Paired::trim_main() {
             int smallest_queue = 0;
             bool fitted_in_a_queue = false;
 
-            //msg("Looking for queue to fit read into it");
-            for(unsigned i = 0; i < queues.size(); i++){
-                /*std::vector<FQEntry*>* queue = queues[i];
-                std::vector<FQEntry*>* queue2 = queues2[i];
-                if(queue_lens[i] + read_len < max_queue_len)
-                {
-                    queue->emplace(queue->begin() + last_item[i]+1, fqrec);
-                    queue_lens[i] += read_len;
-                    queue2->emplace(queue2->begin() + last_item[i]+1, fqrec2);
-                    queue_lens2[i] += read_len2;
-                    fitted_in_a_queue = true;
-                    last_item[i] += 1;
-                }*/
-                if(queue_lens[i] < queue_lens[smallest_queue]){
-                    smallest_queue = i;
-                }
-                //if(fitted_in_a_queue) break;
-            }
-            //msg("Found");
-            if(!fitted_in_a_queue){
-                //msg("Fitting into smallest queue");
-                queues[smallest_queue]->emplace(queues[smallest_queue]->begin() + last_item[smallest_queue]+1, fqrec);
-                queue_lens[smallest_queue] += read_len;
+            long next_index = last_item[last_queue] + 1;
 
-                queues2[smallest_queue]->emplace(queues2[smallest_queue]->begin() + last_item[smallest_queue]+1, fqrec2);
-                queue_lens2[smallest_queue] += read_len2;
-
-                last_item[smallest_queue] += 1;
+            if(next_index < queues[last_queue]->size()){
+                (*queues[last_queue])[next_index] = fqrec;
+                (*queues2[last_queue])[next_index] = fqrec2;
+            }else{
+                queues[last_queue]->push_back(fqrec);
+                queues2[last_queue]->push_back(fqrec2);
             }
-            //msg("Stored read");
+
+            queue_lens[last_queue] += read_len;
+            queue_lens2[last_queue] += read_len2;
+
+            last_item[last_queue] += 1;
+
+            last_queue = (last_queue+1) % threads;
         }
-        //msg("Finished reading batch");
+        msg("Finished reading batch");
 
         if(chars_read_from_batch == 0){
-            msg("Empty batch, finishing program.");
+            msg("No more data, finishing program.");
             break;
         }else{
             for (int i = 0; i < threads; i++){
@@ -408,8 +425,7 @@ int Trim_Paired::trim_main() {
                 saved_cutsites2[i] = new cutsites*[last_item[i]+1];
             }
 
-            //msg("Processing threads:");
-            msg(to_string(threads));
+            msg("Processing threads:");
             vector<thread> running;
 
             for(int thread_n = 0; thread_n < threads; thread_n++){
@@ -426,9 +442,19 @@ int Trim_Paired::trim_main() {
             std::for_each(running.begin(),running.end(), std::mem_fn(&std::thread::join));
 
             writing_results_flag = true;
-            output_paired(queues, queues2, filtered_reads1, filtered_reads2,
-                saved_cutsites1, saved_cutsites2, last_item);
+            output_threads.push_back(thread(&Trim_Paired::output_paired,
+                this,
+                queues, queues2, filtered_reads1, filtered_reads2,
+                saved_cutsites1, saved_cutsites2, last_item)
+            );
+            //output_paired(queues, queues2, filtered_reads1, filtered_reads2,
+            //    saved_cutsites1, saved_cutsites2, last_item);
         }
+    }
+
+    msg("Waiting for output threads");
+    for(int i = 0; i < output_threads.size(); i++){
+        output_threads[i].join();
     }
 
     while(writing_results_flag){
@@ -491,67 +517,91 @@ void Trim_Paired::output_paired(std::vector<std::vector<FQEntry*>* > queues, std
         cutsites*** saved_cutsites, cutsites*** saved_cutsites2,
         vector<long> last_index)
 {
+    int kept_p = 0;
+    int kept_s1 = 0;
+    int kept_s2 = 0;
+    int discard_p = 0;
+    int discard_s1 = 0;
+    int discard_s2 = 0;
+
     msg("Making results string");
     std::stringstream fq1, fq2, singles;
-    for (size_t i = 0; i < queues.size(); i++){
+    
+    for (size_t i = 0; i < threads; i++){
         //msg("Results from thread ");
         //msg(to_string(i));
-        if(queues[i]->size() > last_index[i]){
-            for (size_t j = 0; j <= last_index[i]; j++)
-            {   
-                //msg("Reading data");
-                bool r1 = !filtered_reads[i][j];
-                bool r2 = !filtered_reads2[i][j];
-                FQEntry* read1 = queues[i]->at(j);
-                cutsites* cs1 = saved_cutsites[i][j];
-                FQEntry* read2 = queues2[i]->at(j);
-                cutsites* cs2 = saved_cutsites2[i][j];
-                //msg("Read entry data");
-                if(r1 && r2){
-                    //msg("Writing both");
-                    fq1 << get_read_string(read1, cs1);
-                    if(input_inter){
-                        fq1 << get_read_string(read2, cs2);
-                    }else{
-                        fq2 << get_read_string(read2, cs2);
-                    }
-                    kept_p += 2;
-                }else if(r1 || r2){
-                    if(r1){
-                        //msg("Writing r1");
-                        singles << get_read_string(read1, cs1);
-                        kept_s1++;
-                        discard_s2++;
-                    }else{
-                        //msg("Writing r2");
-                        singles << get_read_string(read2, cs2);
-                        kept_s2++;
-                        discard_s1++;
-                    }
+        for (size_t j = 0; j < queues[i]->size(); j++)
+        {  
+            //msg("Reading data");
+            bool r1 = !filtered_reads[i][j];
+            bool r2 = !filtered_reads2[i][j];
+            FQEntry* read1 = queues[i]->at(j);
+            cutsites* cs1 = saved_cutsites[i][j];
+            FQEntry* read2 = queues2[i]->at(j);
+            cutsites* cs2 = saved_cutsites2[i][j];
+            //msg("Read entry data");
+            if(r1 && r2){
+                //msg("Writing both");
+                fq1 << get_read_string(read1, cs1);
+                if(input_inter){
+                    fq1 << get_read_string(read2, cs2);
                 }else{
-                    //msg("Writing none");
-                    discard_p += 2;
+                    fq2 << get_read_string(read2, cs2);
                 }
+                kept_p += 2;
+            }else if(r1 || r2){
+                if(r1){
+                    //msg("Writing r1");
+                    singles << get_read_string(read1, cs1);
+                    kept_s1++;
+                    discard_s2++;
+                }else{
+                    //msg("Writing r2");
+                    singles << get_read_string(read2, cs2);
+                    kept_s2++;
+                    discard_s1++;
+                }
+            }else{
+                //msg("Writing none");
+                discard_p += 2;
             }
-        }else{
-            //msg("Empty thread, ignoring");
+            delete(read1);
+            delete(read2);
+            free(cs1);
+            free(cs2);
         }
+        delete(queues[i]);
+        delete(queues2[i]);
+        delete(filtered_reads[i]);
+        delete(filtered_reads2[i]);
+        free(saved_cutsites[i]);
+        free(saved_cutsites2[i]);
         //msg("Read results from thread");
     }
+    free(saved_cutsites);
+    free(saved_cutsites2);
     msg("Finished results string");
+
+    lock_guard<mutex> guard(batch_lock);
+    this->kept_p += kept_p;
+    this->kept_s1 += kept_s1;
+    this->kept_s2 += kept_s2;
+    this->discard_p += discard_p;
+    this->discard_s1 += discard_s1;
+    this->discard_s2 += discard_s2;
 
     total = kept_p + kept_s1 + kept_s2 + discard_p + discard_s1 + discard_s2;
     
-    msg("Outputing");
+    //msg("Outputing");
     if (!gzip_output) {
-        msg("Writing plain text");
+        //msg("Writing plain text");
         if(input_inter){
-            msg("Interleaved output");
+            //msg("Interleaved output");
             outfile_interleaved << fq1.str();
             if (sfn) outfile_single << singles.str();
             //fprintf(outfile_interleaved, "%s", fq1.str());
         }else{
-            msg("Separate outputs");
+            //msg("Separate outputs");
             outfile << fq1.str();
             //fprintf(outfile, "%s", );
             outfile2 << fq2.str();
@@ -569,21 +619,16 @@ void Trim_Paired::output_paired(std::vector<std::vector<FQEntry*>* > queues, std
             if (sfn) gzprintf(single_gzip, singles.str().c_str());
         }
     }
-    msg("Finished outputing results");
+    //msg("Finished outputing results");
     writing_results_flag = false;
 }
 
 int Trim_Paired::init_streams(){
+    msg("Opening files");
     if (infnc) {      /* using interleaved input file */
 
         if (infn || infn2 || outfn || outfn2) {
             usage(EXIT_FAILURE, "****Error: Cannot have -f, -r, -o, or -p options with -c.");
-            return EXIT_FAILURE;
-        }
-
-        /* check for duplicate file names */
-        if (!strcmp(infnc, outfnc) || (interleaved_s && (!strcmp(infnc, sfn) || !strcmp(outfnc, sfn)))) {
-            fprintf(stderr, "****Error: Duplicate filename between interleaved input, interleaved output, and/or single output file names.\n\n");
             return EXIT_FAILURE;
         }
 
@@ -619,14 +664,6 @@ int Trim_Paired::init_streams(){
 
         if (infn && (infnc || interleaved_s)) {
             usage(EXIT_FAILURE, "****Error: The -f option cannot be used in combination with -c, -m, or -M.");
-            return EXIT_FAILURE;
-        }
-
-        if (!strcmp(infn, infn2) || !strcmp(infn, outfn) || !strcmp(infn, outfn2) ||
-            !strcmp(infn, sfn) || !strcmp(infn2, outfn) || !strcmp(infn2, outfn2) || 
-            !strcmp(infn2, sfn) || !strcmp(outfn, outfn2) || !strcmp(outfn, sfn) || !strcmp(outfn2, sfn)) {
-
-            fprintf(stderr, "****Error: Duplicate input and/or output file names.\n\n");
             return EXIT_FAILURE;
         }
 
@@ -688,6 +725,8 @@ int Trim_Paired::init_streams(){
         }
     }
 
+
+    msg("Opened files");
     return 0;
 }
 
@@ -721,5 +760,5 @@ void Trim_Paired::close_streams(){
         if(outfile2_gzip) gzclose(outfile2_gzip);
     }
 
-    msg("Closed all streams");
+    msg("Closed all files");
 }
