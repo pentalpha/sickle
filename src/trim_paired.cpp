@@ -309,6 +309,14 @@ int Trim_Paired::trim_main() {
         int last_read_position = 0;
         int last_read_position2 = 0;
 
+<<<<<<< HEAD
+=======
+    Batch* batch = NULL;
+    Batch* batch2 = NULL;
+    int last_read_position = 0;
+    int last_read_position2 = 0;
+    while(true){
+>>>>>>> c1cb366661f48d7b90f027b0e734ca520673821a
         for (int i = 0; i < threads; i++){
             last_item[i] =  -1;
             queue_lens[i] =  0;
